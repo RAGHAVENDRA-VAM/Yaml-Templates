@@ -1,0 +1,72 @@
+---
+# yaml-templates/gitlab-ci/cd/container-cd.yml
+# Purpose: GitLab CI CD pipeline for deploying as Docker container.
+# Stages: Deploy
+# Target: Docker container with build, push, and run
+
+variables:
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+  ENVIRONMENT: "dev"
+
+stages:
+  - deploy
+
+# Deploy stage — deploy as container
+deploy_container:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  environment:
+    name: "$ENVIRONMENT"
+  dependencies:
+    - publish_job  # from upstream CI pipeline
+  before_script:
+    # Login to container registry
+    - echo $REGISTRY_PASSWORD | docker login $CONTAINER_REGISTRY -u $REGISTRY_USERNAME --password-stdin
+  script:
+    # Build Docker image
+    - docker build -t $CONTAINER_REGISTRY/$PROJECT_NAME:$CI_PIPELINE_ID -t $CONTAINER_REGISTRY/$PROJECT_NAME:latest dist/
+    
+    # Push Docker image to registry
+    - docker push $CONTAINER_REGISTRY/$PROJECT_NAME:$CI_PIPELINE_ID
+    - docker push $CONTAINER_REGISTRY/$PROJECT_NAME:latest
+    
+    # Stop and remove existing container
+    - docker stop $PROJECT_NAME || true
+    - docker rm $PROJECT_NAME || true
+    
+    # Pull and run new container
+    - docker pull $CONTAINER_REGISTRY/$PROJECT_NAME:$CI_PIPELINE_ID
+    - |
+      docker run -d \
+        --name $PROJECT_NAME \
+        --restart unless-stopped \
+        -p 80:8080 \
+        -e ENVIRONMENT=$ENVIRONMENT \
+        $CONTAINER_REGISTRY/$PROJECT_NAME:$CI_PIPELINE_ID
+    
+    # Verify container is running
+    - sleep 10
+    - |
+      if docker ps | grep -q $PROJECT_NAME; then
+        echo "✅ Container $PROJECT_NAME is running"
+        docker ps | grep $PROJECT_NAME
+        docker logs $PROJECT_NAME --tail 20
+      else
+        echo "❌ Container $PROJECT_NAME failed to start"
+        docker logs $PROJECT_NAME || true
+        exit 1
+      fi
+    
+    # Container health check
+    - sleep 30
+    - |
+      if curl --fail --silent --max-time 30 http://localhost/health; then
+        echo "✅ Container health check passed"
+      else
+        echo "⚠️ Container health check failed"
+      fi
+  only:
+    - main

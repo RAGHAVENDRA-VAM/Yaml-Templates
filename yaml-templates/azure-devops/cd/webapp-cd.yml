@@ -1,0 +1,75 @@
+---
+# yaml-templates/azure-devops/cd/webapp-cd.yml
+# Purpose: Azure DevOps CD pipeline for deploying to Azure Web App.
+# Stages: Download → Deploy
+# Target: Azure Web App with smoke test
+
+trigger: none
+
+# CD triggers when CI pipeline completes successfully
+resources:
+  pipelines:
+    - pipeline: ci_pipeline
+      source: ci
+      trigger:
+        branches:
+          include:
+            - main
+
+variables:
+  project_name: "$(Build.Repository.Name)"
+  artifact_name: "$(project_name)-drop"
+  environment: "dev"
+  azure_subscription: "$(AZURE_SUBSCRIPTION)"
+  resource_group: "$(RESOURCE_GROUP)"
+
+stages:
+  # Stage 1: Deploy to Azure Web App
+  - stage: Deploy_WebApp
+    displayName: "Deploy to Azure Web App"
+    jobs:
+      - deployment: DeployJob
+        displayName: "Deploy to Web App"
+        pool:
+          vmImage: "ubuntu-latest"
+        environment: "$(environment)"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Download artifact from CI pipeline
+                - task: DownloadBuildArtifacts@0
+                  displayName: "Download $(artifact_name)"
+                  inputs:
+                    buildType: "specific"
+                    project: "$(System.TeamProjectId)"
+                    pipeline: "$(resources.pipeline.ci_pipeline.pipelineID)"
+                    buildVersionToDownload: "latest"
+                    artifactName: "$(artifact_name)"
+                    downloadPath: "$(System.ArtifactsDirectory)"
+
+                # Deploy to Azure Web App
+                - task: AzureWebApp@1
+                  displayName: "Deploy to Azure Web App"
+                  inputs:
+                    azureSubscription: "$(azure_subscription)"
+                    appType: "webApp"
+                    appName: "$(project_name)"
+                    resourceGroupName: "$(resource_group)"
+                    package: "$(System.ArtifactsDirectory)/$(artifact_name)/**"
+                    deploymentMethod: "auto"
+
+                # Smoke test — verify deployment
+                - script: >
+                    sleep 30 &&
+                    curl --fail --silent --max-time 30
+                    https://$(project_name).azurewebsites.net/health
+                  displayName: "Smoke Test"
+                  continueOnError: true
+
+                # Verify app is responding
+                - script: >
+                    curl --fail --silent --max-time 30
+                    https://$(project_name).azurewebsites.net
+                  displayName: "Verify App Response"
+                  continueOnError: true

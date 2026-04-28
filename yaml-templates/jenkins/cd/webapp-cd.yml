@@ -1,0 +1,104 @@
+---
+# yaml-templates/jenkins/cd/webapp-cd.yml
+# Purpose: Jenkins CD pipeline for deploying to Azure Web App.
+# Stages: Deploy
+# Target: Azure Web App with smoke test
+
+pipeline {
+  agent any
+
+  environment {
+    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
+    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
+    ENVIRONMENT = 'dev'
+    AZURE_CLIENT_ID = credentials('AZURE_CLIENT_ID')
+    AZURE_CLIENT_SECRET = credentials('AZURE_CLIENT_SECRET')
+    AZURE_TENANT_ID = credentials('AZURE_TENANT_ID')
+    RESOURCE_GROUP = credentials('RESOURCE_GROUP')
+  }
+
+  triggers {
+    upstream(upstreamProjects: 'dotnet-ci-pipeline', threshold: hudson.model.Result.SUCCESS)
+  }
+
+  stages {
+    // Deploy stage — deploy to Azure Web App
+    stage('Deploy to Web App') {
+      steps {
+        echo "Deploying to Azure Web App: ${env.PROJECT_NAME}"
+        
+        // Copy artifacts from upstream CI job
+        copyArtifacts(
+          projectName: 'dotnet-ci-pipeline',
+          selector: lastSuccessful(),
+          target: 'artifacts/'
+        )
+
+        // Install Azure CLI (if not available)
+        sh '''
+          if ! command -v az &> /dev/null; then
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          fi
+        '''
+
+        // Azure login
+        sh '''
+          az login --service-principal \
+            -u ${AZURE_CLIENT_ID} \
+            -p ${AZURE_CLIENT_SECRET} \
+            --tenant ${AZURE_TENANT_ID}
+        '''
+
+        // Create deployment package
+        sh 'cd artifacts && zip -r ../app.zip . && cd ..'
+
+        // Deploy to Azure Web App
+        sh '''
+          az webapp deployment source config-zip \
+            --resource-group ${RESOURCE_GROUP} \
+            --name ${PROJECT_NAME} \
+            --src app.zip
+        '''
+
+        // Smoke test
+        script {
+          sleep(30)
+          try {
+            sh '''
+              curl --fail --silent --max-time 30 \
+                https://${PROJECT_NAME}.azurewebsites.net/health
+              echo "✅ Smoke test passed"
+            '''
+          } catch (Exception e) {
+            echo "⚠️ Smoke test failed: ${e.getMessage()}"
+          }
+        }
+
+        // Verify app response
+        script {
+          try {
+            sh '''
+              curl --fail --silent --max-time 30 \
+                https://${PROJECT_NAME}.azurewebsites.net
+              echo "✅ App is responding"
+            '''
+          } catch (Exception e) {
+            echo "❌ App is not responding: ${e.getMessage()}"
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+    success {
+      echo "✅ CD pipeline completed successfully"
+    }
+    failure {
+      echo "❌ CD pipeline failed"
+    }
+  }
+}

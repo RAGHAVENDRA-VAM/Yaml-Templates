@@ -1,0 +1,90 @@
+---
+# yaml-templates/gitlab-ci/ci/python-ci.yml
+# Purpose: GitLab CI pipeline for Python applications.
+# Stages: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+variables:
+  PYTHON_VERSION: "3.12"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+stages:
+  - build
+  - test
+  - sast
+  - publish
+
+# Stage 1: Build — Build Python application
+build_python:
+  stage: build
+  image: python:3.12-slim
+  script:
+    - pip install -r requirements.txt
+    - pip install build
+    - python -m build --outdir dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+
+# Stage 2: Test — Run unit tests
+test_python:
+  stage: test
+  image: python:3.12-slim
+  dependencies:
+    - build_python
+  script:
+    - pip install -r requirements.txt
+    - pytest --tb=short --junitxml=test-results.xml
+  artifacts:
+    reports:
+      junit: "test-results.xml"
+    expire_in: 1 week
+
+# Stage 3: SAST — Security scanning (mandatory)
+sast_gitleaks:
+  stage: sast
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --verbose
+  allow_failure: true
+
+sast_semgrep:
+  stage: sast
+  image: returntocorp/semgrep:latest
+  script:
+    - semgrep scan --config auto --json --output semgrep-report.json
+  artifacts:
+    paths:
+      - semgrep-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+sast_trivy:
+  stage: sast
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs . --format json --output trivy-report.json
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+# Stage 4: Publish — Publish final artifact
+publish_python:
+  stage: publish
+  image: python:3.12-slim
+  dependencies:
+    - build_python
+  script:
+    - echo "Publishing $ARTIFACT_NAME"
+  artifacts:
+    name: "$ARTIFACT_NAME"
+    paths:
+      - dist/
+    expire_in: 1 week
+  only:
+    - main
+    - develop

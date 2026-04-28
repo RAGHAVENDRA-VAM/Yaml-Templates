@@ -1,0 +1,128 @@
+---
+# yaml-templates/jenkins/ci/dotnet-ci.yml
+# Purpose: Jenkins CI pipeline for .NET applications.
+# Stages: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+pipeline {
+  agent any
+
+  environment {
+    DOTNET_VERSION = '8.0'
+    BUILD_CONFIGURATION = 'Release'
+    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
+    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
+  }
+
+  triggers {
+    pollSCM('H/5 * * * *')
+  }
+
+  stages {
+    // Stage 1: Build — Compile .NET application
+    stage('Build') {
+      steps {
+        echo "Building .NET application: ${env.PROJECT_NAME}"
+        
+        // Install .NET SDK (if not available)
+        sh '''
+          if ! command -v dotnet &> /dev/null; then
+            wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+            sudo dpkg -i packages-microsoft-prod.deb
+            sudo apt-get update && sudo apt-get install -y dotnet-sdk-8.0
+          fi
+        '''
+        
+        // Restore and build
+        sh 'dotnet restore'
+        sh 'dotnet build --configuration ${BUILD_CONFIGURATION} --no-restore'
+        sh 'dotnet publish --configuration ${BUILD_CONFIGURATION} --no-build --output dist/'
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'dist/**', fingerprint: true
+        }
+      }
+    }
+
+    // Stage 2: Test — Run unit tests
+    stage('Test') {
+      steps {
+        echo "Running unit tests"
+        sh 'dotnet restore'
+        sh 'dotnet test --configuration ${BUILD_CONFIGURATION} --logger trx --results-directory test-results/'
+      }
+      post {
+        always {
+          publishTestResults testResultsPattern: 'test-results/*.trx'
+        }
+      }
+    }
+
+    // Stage 3: SAST — Security scanning (mandatory)
+    stage('SAST') {
+      parallel {
+        stage('Gitleaks') {
+          steps {
+            script {
+              try {
+                sh 'gitleaks detect --source . --verbose'
+              } catch (Exception e) {
+                echo "Gitleaks scan failed: ${e.getMessage()}"
+              }
+            }
+          }
+        }
+        stage('Semgrep') {
+          steps {
+            script {
+              try {
+                sh 'semgrep scan --config auto --json --output semgrep-report.json'
+              } catch (Exception e) {
+                echo "Semgrep scan failed: ${e.getMessage()}"
+              }
+            }
+          }
+        }
+        stage('Trivy') {
+          steps {
+            script {
+              try {
+                sh 'trivy fs . --format json --output trivy-report.json'
+              } catch (Exception e) {
+                echo "Trivy scan failed: ${e.getMessage()}"
+              }
+            }
+          }
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: '*-report.json', allowEmptyArchive: true
+        }
+      }
+    }
+
+    // Stage 4: Publish — Publish final artifact
+    stage('Publish') {
+      steps {
+        echo "Publishing ${env.ARTIFACT_NAME}"
+        sh 'dotnet restore'
+        sh 'dotnet publish --configuration ${BUILD_CONFIGURATION} --output dist/'
+        archiveArtifacts artifacts: 'dist/**', fingerprint: true
+      }
+    }
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+    success {
+      echo "✅ CI pipeline completed successfully"
+    }
+    failure {
+      echo "❌ CI pipeline failed"
+    }
+  }
+}

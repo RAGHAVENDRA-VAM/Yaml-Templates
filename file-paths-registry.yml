@@ -1,0 +1,198 @@
+---
+# file-paths-registry.yml
+# Purpose: Complete registry of all file paths in the YAML Templates repository.
+# This file serves as a reference for AI agents and developers to locate specific templates.
+
+repository_structure:
+  
+  # Global Templates (Universal Standards)
+  global_templates:
+    ci_template: "global-ci-template.yml"
+    cd_template: "global-cd-template.yml"
+    
+  # Reference Files
+  reference_files:
+    ai_reference: "yaml-templates/reference/ai-reference.yml"
+    
+  # Documentation
+  documentation:
+    main_readme: "yaml-templates/README.md"
+    file_registry: "file-paths-registry.yml"
+    yamllint_config: ".yamllint.yml"
+    agents_guide: "AGENTS.md"
+
+# CI/CD Tool Templates
+cicd_tools:
+  
+  # Azure DevOps Templates
+  azure_devops:
+    ci_templates:
+      dotnet: "yaml-templates/azure-devops/ci/dotnet-ci.yml"
+      node: "yaml-templates/azure-devops/ci/node-ci.yml"
+      python: "yaml-templates/azure-devops/ci/python-ci.yml"
+      java: "yaml-templates/azure-devops/ci/java-ci.yml"
+    cd_templates:
+      webapp: "yaml-templates/azure-devops/cd/webapp-cd.yml"
+      aks: "yaml-templates/azure-devops/cd/aks-cd.yml"
+      vm: "yaml-templates/azure-devops/cd/vm-cd.yml"
+      container: "yaml-templates/azure-devops/cd/container-cd.yml"
+  
+  # GitHub Actions Templates
+  github_actions:
+    ci_templates:
+      dotnet: "yaml-templates/github-actions/ci/dotnet-ci.yml"
+      node: "yaml-templates/github-actions/ci/node-ci.yml"
+      python: "yaml-templates/github-actions/ci/python-ci.yml"
+      java: "yaml-templates/github-actions/ci/java-ci.yml"
+    cd_templates:
+      webapp: "yaml-templates/github-actions/cd/webapp-cd.yml"
+      aks: "yaml-templates/github-actions/cd/aks-cd.yml"
+      vm: "yaml-templates/github-actions/cd/vm-cd.yml"
+      container: "yaml-templates/github-actions/cd/container-cd.yml"
+  
+  # GitLab CI Templates
+  gitlab_ci:
+    ci_templates:
+      dotnet: "yaml-templates/gitlab-ci/ci/dotnet-ci.yml"
+      node: "yaml-templates/gitlab-ci/ci/node-ci.yml"
+      python: "yaml-templates/gitlab-ci/ci/python-ci.yml"
+      java: "yaml-templates/gitlab-ci/ci/java-ci.yml"
+    cd_templates:
+      webapp: "yaml-templates/gitlab-ci/cd/webapp-cd.yml"
+      aks: "yaml-templates/gitlab-ci/cd/aks-cd.yml"
+      vm: "yaml-templates/gitlab-ci/cd/vm-cd.yml"
+      container: "yaml-templates/gitlab-ci/cd/container-cd.yml"
+  
+  # Jenkins Templates
+  jenkins:
+    ci_templates:
+      dotnet: "yaml-templates/jenkins/ci/dotnet-ci.yml"
+      node: "yaml-templates/jenkins/ci/node-ci.yml"
+      python: "yaml-templates/jenkins/ci/python-ci.yml"
+      java: "yaml-templates/jenkins/ci/java-ci.yml"
+    cd_templates:
+      webapp: "yaml-templates/jenkins/cd/webapp-cd.yml"
+      aks: "yaml-templates/jenkins/cd/aks-cd.yml"
+      vm: "yaml-templates/jenkins/cd/vm-cd.yml"
+      container: "yaml-templates/jenkins/cd/container-cd.yml"
+
+# Template Categories
+template_categories:
+  
+  # CI Templates by Language
+  ci_by_language:
+    dotnet:
+      - "yaml-templates/azure-devops/ci/dotnet-ci.yml"
+      - "yaml-templates/github-actions/ci/dotnet-ci.yml"
+      - "yaml-templates/gitlab-ci/ci/dotnet-ci.yml"
+      - "yaml-templates/jenkins/ci/dotnet-ci.yml"
+    node:
+      - "yaml-templates/azure-devops/ci/node-ci.yml"
+      - "yaml-templates/github-actions/ci/node-ci.yml"
+      - "yaml-templates/gitlab-ci/ci/node-ci.yml"
+      - "yaml-templates/jenkins/ci/node-ci.yml"
+    python:
+      - "yaml-templates/azure-devops/ci/python-ci.yml"
+      - "yaml-templates/github-actions/ci/python-ci.yml"
+      - "yaml-templates/gitlab-ci/ci/python-ci.yml"
+      - "yaml-templates/jenkins/ci/python-ci.yml"
+    java:
+      - "yaml-templates/azure-devops/ci/java-ci.yml"
+      - "yaml-templates/github-actions/ci/java-ci.yml"
+      - "yaml-templates/gitlab-ci/ci/java-ci.yml"
+      - "yaml-templates/jenkins/ci/java-ci.yml"
+  
+  # CD Templates by Deploy Target
+  cd_by_target:
+    webapp:
+      - "yaml-templates/azure-devops/cd/webapp-cd.yml"
+      - "yaml-templates/github-actions/cd/webapp-cd.yml"
+      - "yaml-templates/gitlab-ci/cd/webapp-cd.yml"
+      - "yaml-templates/jenkins/cd/webapp-cd.yml"
+    aks:
+      - "yaml-templates/azure-devops/cd/aks-cd.yml"
+      - "yaml-templates/github-actions/cd/aks-cd.yml"
+      - "yaml-templates/gitlab-ci/cd/aks-cd.yml"
+      - "yaml-templates/jenkins/cd/aks-cd.yml"
+    vm:
+      - "yaml-templates/azure-devops/cd/vm-cd.yml"
+      - "yaml-templates/github-actions/cd/vm-cd.yml"
+      - "yaml-templates/gitlab-ci/cd/vm-cd.yml"
+      - "yaml-templates/jenkins/cd/vm-cd.yml"
+    container:
+      - "yaml-templates/azure-devops/cd/container-cd.yml"
+      - "yaml-templates/github-actions/cd/container-cd.yml"
+      - "yaml-templates/gitlab-ci/cd/container-cd.yml"
+      - "yaml-templates/jenkins/cd/container-cd.yml"
+
+# File Statistics
+file_statistics:
+  total_files: 40
+  ci_templates: 16  # 4 tools × 4 languages
+  cd_templates: 16  # 4 tools × 4 deploy targets
+  reference_files: 1
+  global_templates: 2
+  documentation_files: 4
+  
+  by_tool:
+    azure_devops: 8  # 4 CI + 4 CD
+    github_actions: 8  # 4 CI + 4 CD
+    gitlab_ci: 8  # 4 CI + 4 CD
+    jenkins: 8  # 4 CI + 4 CD
+  
+  by_language:
+    dotnet: 4  # 1 per tool
+    node: 4  # 1 per tool
+    python: 4  # 1 per tool
+    java: 4  # 1 per tool
+  
+  by_deploy_target:
+    webapp: 4  # 1 per tool
+    aks: 4  # 1 per tool
+    vm: 4  # 1 per tool
+    container: 4  # 1 per tool
+
+# Usage Patterns for AI Agents
+ai_usage_patterns:
+  
+  # Step 1: Read global templates and reference
+  initialization:
+    - "global-ci-template.yml"
+    - "global-cd-template.yml"
+    - "yaml-templates/reference/ai-reference.yml"
+  
+  # Step 2: Select tool-specific templates
+  template_selection:
+    ci_template_pattern: "yaml-templates/{tool}/ci/{language}-ci.yml"
+    cd_template_pattern: "yaml-templates/{tool}/cd/{target}-cd.yml"
+  
+  # Step 3: Validation references
+  validation:
+    - ".yamllint.yml"
+    - "yaml-templates/README.md"
+
+# Quick Reference Paths
+quick_reference:
+  
+  # Most commonly used templates
+  popular_combinations:
+    dotnet_webapp_azure: 
+      ci: "yaml-templates/azure-devops/ci/dotnet-ci.yml"
+      cd: "yaml-templates/azure-devops/cd/webapp-cd.yml"
+    node_container_github:
+      ci: "yaml-templates/github-actions/ci/node-ci.yml"
+      cd: "yaml-templates/github-actions/cd/container-cd.yml"
+    python_aks_gitlab:
+      ci: "yaml-templates/gitlab-ci/ci/python-ci.yml"
+      cd: "yaml-templates/gitlab-ci/cd/aks-cd.yml"
+    java_vm_jenkins:
+      ci: "yaml-templates/jenkins/ci/java-ci.yml"
+      cd: "yaml-templates/jenkins/cd/vm-cd.yml"
+  
+  # Essential reference files
+  essential_files:
+    - "global-ci-template.yml"
+    - "global-cd-template.yml"
+    - "yaml-templates/reference/ai-reference.yml"
+    - "file-paths-registry.yml"
+    - "yaml-templates/README.md"

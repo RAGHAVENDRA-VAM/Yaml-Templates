@@ -1,0 +1,91 @@
+---
+# yaml-templates/azure-devops/cd/aks-cd.yml
+# Purpose: Azure DevOps CD pipeline for deploying to Azure Kubernetes Service.
+# Stages: Download → Deploy
+# Target: AKS with kubectl and rollout verification
+
+trigger: none
+
+# CD triggers when CI pipeline completes successfully
+resources:
+  pipelines:
+    - pipeline: ci_pipeline
+      source: ci
+      trigger:
+        branches:
+          include:
+            - main
+
+variables:
+  project_name: "$(Build.Repository.Name)"
+  artifact_name: "$(project_name)-drop"
+  environment: "dev"
+  azure_subscription: "$(AZURE_SUBSCRIPTION)"
+  resource_group: "$(RESOURCE_GROUP)"
+  aks_cluster_name: "$(AKS_CLUSTER_NAME)"
+  aks_namespace: "$(AKS_NAMESPACE)"
+
+stages:
+  # Stage 1: Deploy to AKS
+  - stage: Deploy_AKS
+    displayName: "Deploy to Azure Kubernetes Service"
+    jobs:
+      - deployment: DeployJob
+        displayName: "Deploy to AKS"
+        pool:
+          vmImage: "ubuntu-latest"
+        environment: "$(environment)"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Download artifact from CI pipeline
+                - task: DownloadBuildArtifacts@0
+                  displayName: "Download $(artifact_name)"
+                  inputs:
+                    buildType: "specific"
+                    project: "$(System.TeamProjectId)"
+                    pipeline: "$(resources.pipeline.ci_pipeline.pipelineID)"
+                    buildVersionToDownload: "latest"
+                    artifactName: "$(artifact_name)"
+                    downloadPath: "$(System.ArtifactsDirectory)"
+
+                # Set AKS context
+                - task: AzureCLI@2
+                  displayName: "Set AKS Context"
+                  inputs:
+                    azureSubscription: "$(azure_subscription)"
+                    scriptType: "bash"
+                    scriptLocation: "inlineScript"
+                    inlineScript: >
+                      az aks get-credentials
+                      --resource-group $(resource_group)
+                      --name $(aks_cluster_name)
+                      --overwrite-existing
+
+                # Update image tag in deployment manifest
+                - script: >
+                    sed -i "s|IMAGE_TAG|$(Build.BuildId)|g"
+                    $(System.ArtifactsDirectory)/$(artifact_name)/manifests/deployment.yaml
+                  displayName: "Set Image Tag"
+
+                # Deploy to AKS using kubectl
+                - task: KubernetesManifest@0
+                  displayName: "Deploy to AKS"
+                  inputs:
+                    action: "deploy"
+                    kubernetesServiceConnection: "$(AKS_SERVICE_CONNECTION)"
+                    namespace: "$(aks_namespace)"
+                    manifests: "$(System.ArtifactsDirectory)/$(artifact_name)/manifests/*.yaml"
+
+                # Verify rollout status
+                - script: >
+                    kubectl rollout status deployment/$(project_name)
+                    --namespace $(aks_namespace) --timeout=300s
+                  displayName: "Verify Rollout"
+
+                # Get pod status
+                - script: >
+                    kubectl get pods --namespace $(aks_namespace)
+                    -l app=$(project_name)
+                  displayName: "Get Pod Status"

@@ -1,0 +1,192 @@
+---
+# global-ci-template.yml
+# Purpose: Universal CI template structure for all CI/CD tools and languages.
+# This file defines the mandatory structure that ALL CI pipelines must follow.
+# AI agents must use this as the base template for generating tool-specific CI files.
+
+# YAML Coding Standards (MANDATORY)
+yaml_standards:
+  document_start: "---"
+  encoding: "UTF-8"
+  indentation: 2  # spaces only, no tabs
+  naming_convention: "snake_case"
+  line_length: 120
+  comments: "required for all major sections"
+
+# Universal CI Pipeline Structure (NEVER CHANGE THIS ORDER)
+ci_pipeline_structure:
+  
+  # Stage 1: Build (MANDATORY)
+  stage_build:
+    name: "Build"
+    purpose: "Compile source code, restore dependencies, stage build output"
+    steps:
+      - "checkout_code"
+      - "install_language_sdk"
+      - "restore_dependencies"
+      - "compile_application"
+      - "stage_build_output"
+    
+  # Stage 2: Test (MANDATORY)
+  stage_test:
+    name: "Test"
+    purpose: "Run unit tests, publish test results"
+    steps:
+      - "setup_test_environment"
+      - "run_unit_tests"
+      - "publish_test_results"
+      - "generate_test_reports"
+    
+  # Stage 3: SAST (MANDATORY - NEVER SKIP)
+  stage_sast:
+    name: "SAST"
+    purpose: "Security scanning with mandatory tools"
+    tools:
+      gitleaks:
+        command: "gitleaks detect --source . --verbose"
+        purpose: "Secret and credential detection"
+        continue_on_error: true
+      semgrep:
+        command: "semgrep scan --config auto --json --output semgrep-report.json"
+        purpose: "Static code analysis"
+        continue_on_error: true
+      trivy:
+        command: "trivy fs . --format json --output trivy-report.json"
+        purpose: "Dependency and filesystem vulnerability scan"
+        continue_on_error: true
+    steps:
+      - "run_gitleaks_scan"
+      - "run_semgrep_scan"
+      - "run_trivy_scan"
+      - "publish_sast_reports"
+    
+  # Stage 4: Publish (MANDATORY)
+  stage_publish:
+    name: "Publish"
+    purpose: "Publish build artifact for CD consumption"
+    steps:
+      - "create_final_artifact"
+      - "publish_build_artifact"
+      - "set_artifact_metadata"
+
+# Language-Specific Requirements
+language_requirements:
+  
+  dotnet:
+    sdk_version: "8.x"
+    build_commands:
+      - "dotnet restore"
+      - "dotnet build --configuration Release --no-restore"
+      - "dotnet publish --configuration Release --no-build --output dist/"
+    test_commands:
+      - "dotnet test --no-build --configuration Release --logger trx"
+    artifact_path: "dist/"
+    
+  node:
+    version: "20.x"
+    build_commands:
+      - "npm ci"
+      - "npm run build"
+    test_commands:
+      - "npm test -- --reporters=jest-junit"
+    artifact_path: "dist/"
+    
+  python:
+    version: "3.12"
+    build_commands:
+      - "pip install -r requirements.txt"
+      - "python -m build --outdir dist/"
+    test_commands:
+      - "pytest --tb=short --junitxml=test-results.xml"
+    artifact_path: "dist/"
+    
+  java:
+    version: "21"
+    build_commands:
+      - "mvn clean package -DskipTests --batch-mode"
+    test_commands:
+      - "mvn test --batch-mode"
+    artifact_path: "target/"
+
+# Tool-Specific Syntax Patterns
+tool_syntax:
+  
+  azure_devops:
+    trigger_syntax: |
+      trigger:
+        branches:
+          include:
+            - main
+            - develop
+    stage_syntax: |
+      - stage: {stage_name}
+        displayName: "{display_name}"
+        jobs:
+          - job: {job_name}
+            steps:
+              - {steps}
+    
+  github_actions:
+    trigger_syntax: |
+      on:
+        push:
+          branches:
+            - main
+            - develop
+    job_syntax: |
+      {job_name}:
+        name: "{display_name}"
+        runs-on: ubuntu-latest
+        steps:
+          - {steps}
+    
+  gitlab_ci:
+    stage_syntax: |
+      stages:
+        - build
+        - test
+        - sast
+        - publish
+      
+      {job_name}:
+        stage: {stage_name}
+        script:
+          - {commands}
+    
+  jenkins:
+    pipeline_syntax: |
+      pipeline {
+        agent any
+        stages {
+          stage('{stage_name}') {
+            steps {
+              {steps}
+            }
+          }
+        }
+      }
+
+# Universal Variables (ALL TOOLS MUST USE)
+universal_variables:
+  project_name: "auto-detect from repository"
+  artifact_name: "{project_name}-drop"
+  build_configuration: "Release"
+  environment: "dev"
+
+# Mandatory Rules for AI Generation
+ai_generation_rules:
+  - "Always start with --- document marker"
+  - "Always include file header comment with purpose"
+  - "Use 2-space indentation, never tabs"
+  - "Follow snake_case for all variable names"
+  - "Quote strings containing special characters"
+  - "CI must have exactly 4 stages: Build → Test → SAST → Publish"
+  - "SAST must include all 3 tools: gitleaks, semgrep, trivy"
+  - "Set continueOnError: true for all SAST tools"
+  - "Publish SAST reports as artifacts with condition: always"
+  - "Use tool-specific syntax for each CI/CD platform"
+  - "Include comments for each stage explaining its purpose"
+  - "Set proper dependencies between stages"
+  - "Use environment-specific variables"
+  - "Include proper error handling"
+  - "Generate tool-native YAML syntax"

@@ -1,0 +1,143 @@
+---
+# yaml-templates/azure-devops/ci/dotnet-ci.yml
+# Purpose: Azure DevOps CI pipeline for .NET applications.
+# Stages: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  build_configuration: "Release"
+  dotnet_version: "8.x"
+  project_name: "$(Build.Repository.Name)"
+  artifact_name: "$(project_name)-drop"
+
+stages:
+  # Stage 1: Build — Compile .NET application
+  - stage: Build
+    displayName: "Build Stage"
+    jobs:
+      - job: BuildJob
+        displayName: "Build .NET Application"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+
+          - task: UseDotNet@2
+            displayName: "Install .NET SDK"
+            inputs:
+              version: "$(dotnet_version)"
+
+          - script: "dotnet restore"
+            displayName: "Restore Dependencies"
+
+          - script: "dotnet build --configuration $(build_configuration) --no-restore"
+            displayName: "Build Application"
+
+          - script: >
+              dotnet publish --configuration $(build_configuration)
+              --no-build --output $(Build.ArtifactStagingDirectory)
+            displayName: "Publish Application"
+
+  # Stage 2: Test — Run unit tests
+  - stage: Test
+    displayName: "Unit Testing"
+    dependsOn: Build
+    jobs:
+      - job: TestJob
+        displayName: "Run Unit Tests"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+
+          - task: UseDotNet@2
+            displayName: "Install .NET SDK"
+            inputs:
+              version: "$(dotnet_version)"
+
+          - script: "dotnet restore"
+            displayName: "Restore Dependencies"
+
+          - script: >
+              dotnet test --configuration $(build_configuration)
+              --logger trx --results-directory $(Agent.TempDirectory)
+            displayName: "Run Unit Tests"
+
+          - task: PublishTestResults@2
+            displayName: "Publish Test Results"
+            inputs:
+              testResultsFormat: "VSTest"
+              testResultsFiles: "$(Agent.TempDirectory)/**/*.trx"
+            condition: always()
+
+  # Stage 3: SAST — Security scanning (mandatory)
+  - stage: SAST
+    displayName: "Security Scan"
+    dependsOn: Test
+    jobs:
+      - job: SecurityJob
+        displayName: "Run SAST Tools"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+
+          # Gitleaks — detect secrets and credentials
+          - script: "gitleaks detect --source . --verbose"
+            displayName: "Gitleaks — Secret Detection"
+            continueOnError: true
+
+          # Semgrep — static code analysis
+          - script: "semgrep scan --config auto --json --output semgrep-report.json"
+            displayName: "Semgrep — Code Analysis"
+            continueOnError: true
+
+          # Trivy — dependency and filesystem scan
+          - script: "trivy fs . --format json --output trivy-report.json"
+            displayName: "Trivy — Dependency & FS Scan"
+            continueOnError: true
+
+          # Publish SAST reports
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish SAST Reports"
+            inputs:
+              pathToPublish: "."
+              artifactName: "sast-reports"
+            condition: always()
+
+  # Stage 4: Publish — Publish build artifact
+  - stage: Publish
+    displayName: "Publish Artifact"
+    dependsOn: SAST
+    jobs:
+      - job: PublishJob
+        displayName: "Publish Build Artifact"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - checkout: self
+
+          - task: UseDotNet@2
+            displayName: "Install .NET SDK"
+            inputs:
+              version: "$(dotnet_version)"
+
+          - script: "dotnet restore"
+            displayName: "Restore Dependencies"
+
+          - script: >
+              dotnet publish --configuration $(build_configuration)
+              --output $(Build.ArtifactStagingDirectory)
+            displayName: "Publish Application"
+
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish $(artifact_name)"
+            inputs:
+              pathToPublish: "$(Build.ArtifactStagingDirectory)"
+              artifactName: "$(artifact_name)"

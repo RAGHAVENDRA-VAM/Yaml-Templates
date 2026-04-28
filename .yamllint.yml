@@ -1,0 +1,48 @@
+---
+# .yamllint.yml
+# Purpose: yamllint configuration — run `yamllint .` to validate all YAML files.
+# Add this as a CI validation step: failure here blocks the pipeline.
+
+extends: default
+
+rules:
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  line-length:
+    max: 120
+    level: warning
+
+  trailing-spaces:
+    level: error
+
+  comments:
+    require-starting-space: true
+    min-spaces-from-content: 2
+
+  document-start:
+    present: true
+
+  truthy:
+    allowed-values:
+      - "true"
+      - "false"
+    level: error
+
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1

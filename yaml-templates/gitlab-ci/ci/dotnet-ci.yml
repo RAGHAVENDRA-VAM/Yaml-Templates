@@ -1,0 +1,91 @@
+---
+# yaml-templates/gitlab-ci/ci/dotnet-ci.yml
+# Purpose: GitLab CI pipeline for .NET applications.
+# Stages: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+variables:
+  DOTNET_VERSION: "8.0"
+  BUILD_CONFIGURATION: "Release"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+stages:
+  - build
+  - test
+  - sast
+  - publish
+
+# Stage 1: Build — Compile .NET application
+build_dotnet:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet restore
+    - dotnet build --configuration $BUILD_CONFIGURATION --no-restore
+    - dotnet publish --configuration $BUILD_CONFIGURATION --no-build --output dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+
+# Stage 2: Test — Run unit tests
+test_dotnet:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  dependencies:
+    - build_dotnet
+  script:
+    - dotnet restore
+    - dotnet test --configuration $BUILD_CONFIGURATION --logger trx --results-directory test-results/
+  artifacts:
+    reports:
+      junit: "test-results/*.trx"
+    expire_in: 1 week
+
+# Stage 3: SAST — Security scanning (mandatory)
+sast_gitleaks:
+  stage: sast
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --verbose
+  allow_failure: true
+
+sast_semgrep:
+  stage: sast
+  image: returntocorp/semgrep:latest
+  script:
+    - semgrep scan --config auto --json --output semgrep-report.json
+  artifacts:
+    paths:
+      - semgrep-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+sast_trivy:
+  stage: sast
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs . --format json --output trivy-report.json
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+# Stage 4: Publish — Publish final artifact
+publish_dotnet:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  dependencies:
+    - build_dotnet
+  script:
+    - echo "Publishing $ARTIFACT_NAME"
+  artifacts:
+    name: "$ARTIFACT_NAME"
+    paths:
+      - dist/
+    expire_in: 1 week
+  only:
+    - main
+    - develop

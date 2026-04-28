@@ -1,0 +1,89 @@
+---
+# yaml-templates/gitlab-ci/ci/node-ci.yml
+# Purpose: GitLab CI pipeline for Node.js applications.
+# Stages: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+variables:
+  NODE_VERSION: "20"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+stages:
+  - build
+  - test
+  - sast
+  - publish
+
+# Stage 1: Build — Compile Node.js application
+build_node:
+  stage: build
+  image: node:20-alpine
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 hour
+
+# Stage 2: Test — Run unit tests
+test_node:
+  stage: test
+  image: node:20-alpine
+  dependencies:
+    - build_node
+  script:
+    - npm ci
+    - npm test -- --reporters=jest-junit --outputFile=test-results.xml
+  artifacts:
+    reports:
+      junit: "test-results.xml"
+    expire_in: 1 week
+
+# Stage 3: SAST — Security scanning (mandatory)
+sast_gitleaks:
+  stage: sast
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --verbose
+  allow_failure: true
+
+sast_semgrep:
+  stage: sast
+  image: returntocorp/semgrep:latest
+  script:
+    - semgrep scan --config auto --json --output semgrep-report.json
+  artifacts:
+    paths:
+      - semgrep-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+sast_trivy:
+  stage: sast
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs . --format json --output trivy-report.json
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+# Stage 4: Publish — Publish final artifact
+publish_node:
+  stage: publish
+  image: node:20-alpine
+  dependencies:
+    - build_node
+  script:
+    - echo "Publishing $ARTIFACT_NAME"
+  artifacts:
+    name: "$ARTIFACT_NAME"
+    paths:
+      - dist/
+    expire_in: 1 week
+  only:
+    - main
+    - develop

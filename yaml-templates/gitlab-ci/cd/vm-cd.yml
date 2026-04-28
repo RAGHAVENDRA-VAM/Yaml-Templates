@@ -1,0 +1,79 @@
+---
+# yaml-templates/gitlab-ci/cd/vm-cd.yml
+# Purpose: GitLab CI CD pipeline for deploying to Virtual Machine via SSH.
+# Stages: Deploy
+# Target: VM with SSH copy, service restart, and health check
+
+variables:
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+  ENVIRONMENT: "dev"
+
+stages:
+  - deploy
+
+# Deploy stage — deploy to VM
+deploy_vm:
+  stage: deploy
+  image: ubuntu:latest
+  environment:
+    name: "$ENVIRONMENT"
+  dependencies:
+    - publish_job  # from upstream CI pipeline
+  before_script:
+    # Install SSH client
+    - apt-get update && apt-get install -y openssh-client zip curl
+    # Setup SSH key
+    - mkdir -p ~/.ssh && echo "$VM_SSH_KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H $VM_HOST >> ~/.ssh/known_hosts
+  script:
+    # Create deployment package
+    - cd dist && zip -r ../app.zip . && cd ..
+    
+    # Copy artifact to VM
+    - scp app.zip $VM_USERNAME@$VM_HOST:/app/releases/$CI_PIPELINE_ID/
+    
+    # Deploy on VM
+    - |
+      ssh $VM_USERNAME@$VM_HOST "
+        # Create backup of current version
+        sudo cp -r /app/current /app/backup/\$(date +%Y%m%d_%H%M%S) || true
+        
+        # Deploy new version
+        cd /app/releases/$CI_PIPELINE_ID
+        unzip -o app.zip -d /app/current
+        
+        # Set permissions
+        sudo chown -R appuser:appuser /app/current
+        sudo chmod +x /app/current/start.sh || true
+        
+        # Restart service
+        sudo systemctl restart $PROJECT_NAME
+      "
+    
+    # Verify service health
+    - |
+      ssh $VM_USERNAME@$VM_HOST "
+        # Wait for service to start
+        sleep 10
+        
+        # Check service status
+        if systemctl is-active --quiet $PROJECT_NAME; then
+          echo '✅ Service $PROJECT_NAME is running'
+          systemctl status $PROJECT_NAME --no-pager
+        else
+          echo '❌ Service $PROJECT_NAME failed to start'
+          systemctl status $PROJECT_NAME --no-pager
+          exit 1
+        fi
+      "
+    
+    # HTTP health check
+    - |
+      if ssh $VM_USERNAME@$VM_HOST "curl --fail --silent --max-time 30 http://localhost:8080/health"; then
+        echo "✅ HTTP health check passed"
+      else
+        echo "⚠️ HTTP health check failed"
+      fi
+  only:
+    - main

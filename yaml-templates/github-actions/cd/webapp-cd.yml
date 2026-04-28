@@ -1,0 +1,73 @@
+---
+# yaml-templates/github-actions/cd/webapp-cd.yml
+# Purpose: GitHub Actions CD workflow for deploying to Azure Web App.
+# Jobs: Download → Deploy
+# Target: Azure Web App with smoke test
+
+name: "Web App CD Pipeline"
+
+on:
+  workflow_run:
+    workflows: [".NET CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  PROJECT_NAME: "${{ github.event.repository.name }}"
+  ARTIFACT_NAME: "${{ github.event.repository.name }}-drop"
+  ENVIRONMENT: "dev"
+
+jobs:
+  # Deploy job — deploy to Azure Web App
+  deploy:
+    name: "Deploy to Azure Web App"
+    runs-on: ubuntu-latest
+    environment: "${{ env.ENVIRONMENT }}"
+    if: "${{ github.event.workflow_run.conclusion == 'success' }}"
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      # Download artifact from CI workflow
+      - name: "Download ${{ env.ARTIFACT_NAME }}"
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ env.ARTIFACT_NAME }}"
+          path: "artifacts/"
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          run-id: "${{ github.event.workflow_run.id }}"
+
+      # Azure login
+      - name: "Azure Login"
+        uses: azure/login@v1
+        with:
+          creds: "${{ secrets.AZURE_CREDENTIALS }}"
+
+      # Deploy to Azure Web App
+      - name: "Deploy to Azure Web App"
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: "${{ env.PROJECT_NAME }}"
+          resource-group: "${{ secrets.RESOURCE_GROUP }}"
+          package: "artifacts/"
+
+      # Smoke test — verify deployment
+      - name: "Smoke Test"
+        run: >
+          sleep 30 &&
+          curl --fail --silent --max-time 30
+          https://${{ env.PROJECT_NAME }}.azurewebsites.net/health
+          && echo "✅ Smoke test passed"
+          || echo "⚠️ Smoke test failed"
+        continue-on-error: true
+
+      # Verify app is responding
+      - name: "Verify App Response"
+        run: >
+          curl --fail --silent --max-time 30
+          https://${{ env.PROJECT_NAME }}.azurewebsites.net
+          && echo "✅ App is responding"
+          || echo "❌ App is not responding"
+        continue-on-error: true

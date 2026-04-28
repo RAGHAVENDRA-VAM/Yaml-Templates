@@ -1,0 +1,166 @@
+---
+# yaml-templates/reference/ai-reference.yml
+# Purpose: Reference file for AI agent to generate consistent CI/CD YAML templates.
+# AI must follow these standards and structure for ALL generated files.
+
+yaml_coding_standards:
+  # Document structure
+  document_start: "---"  # Every file must start with ---
+  encoding: "UTF-8"
+  
+  # Indentation and spacing
+  indentation:
+    type: "spaces"
+    size: 2
+    tabs_allowed: false
+  
+  spacing:
+    after_colon: true     # key: value (space after colon)
+    after_dash: true      # - item (space after dash)
+  
+  # Naming conventions
+  naming:
+    convention: "snake_case"
+    examples:
+      - "project_name"
+      - "build_configuration"
+      - "artifact_name"
+  
+  # String handling
+  strings:
+    quote_special_characters: true
+    special_chars: [":", "@", "#", "{", "}", "[", "]", "&", "*", "!", "%"]
+  
+  # Comments
+  comments:
+    file_header: "required"
+    complex_blocks: "required"
+    format: "# Comment text"
+  
+  # Line length and structure
+  line_length: 120
+  max_nesting_level: 4
+  
+  # Multi-line strings
+  folded_block: ">"      # Use > for commands
+  literal_block: "|"     # Use | for scripts
+
+# CI Pipeline Structure (MANDATORY - Never change this order)
+ci_pipeline_stages:
+  stage_1:
+    name: "Build"
+    purpose: "Compile source code, restore dependencies"
+    mandatory: true
+  
+  stage_2:
+    name: "Test"
+    purpose: "Run unit tests, publish test results"
+    mandatory: true
+  
+  stage_3:
+    name: "SAST"
+    purpose: "Security scanning with Gitleaks, Semgrep, Trivy"
+    mandatory: true
+    tools:
+      - name: "gitleaks"
+        command: "gitleaks detect --source . --verbose"
+        purpose: "Secret and credential detection"
+      - name: "semgrep"
+        command: "semgrep scan --config auto --json --output semgrep-report.json"
+        purpose: "Static code analysis"
+      - name: "trivy"
+        command: "trivy fs . --format json --output trivy-report.json"
+        purpose: "Dependency and filesystem vulnerability scan"
+  
+  stage_4:
+    name: "Publish"
+    purpose: "Publish build artifact for CD consumption"
+    mandatory: true
+
+# CD Pipeline Structure (MANDATORY)
+cd_pipeline_stages:
+  stage_1:
+    name: "Download"
+    purpose: "Download artifact from CI pipeline"
+    mandatory: true
+  
+  stage_2:
+    name: "Deploy"
+    purpose: "Deploy to target environment"
+    mandatory: true
+    targets: ["aks", "webapp", "vm", "container"]
+
+# Language-specific requirements
+languages:
+  dotnet:
+    sdk_version: "8.x"
+    build_steps:
+      - "dotnet restore"
+      - "dotnet build --configuration Release --no-restore"
+      - "dotnet publish --configuration Release --no-build --output dist/"
+    test_steps:
+      - "dotnet test --no-build --configuration Release --logger trx"
+  
+  node:
+    version: "20.x"
+    build_steps:
+      - "npm ci"
+      - "npm run build"
+    test_steps:
+      - "npm test -- --reporters=jest-junit"
+  
+  python:
+    version: "3.12"
+    build_steps:
+      - "pip install -r requirements.txt"
+      - "python -m build --outdir dist/"
+    test_steps:
+      - "pytest --tb=short --junitxml=test-results.xml"
+  
+  java:
+    version: "21"
+    build_steps:
+      - "mvn clean package -DskipTests --batch-mode"
+    test_steps:
+      - "mvn test --batch-mode"
+
+# Deploy targets
+deploy_targets:
+  aks:
+    purpose: "Deploy to Azure Kubernetes Service"
+    requirements: ["kubectl", "azure-cli"]
+  
+  webapp:
+    purpose: "Deploy to Azure Web App"
+    requirements: ["azure-cli", "zip"]
+  
+  vm:
+    purpose: "Deploy to Virtual Machine via SSH"
+    requirements: ["ssh", "scp"]
+  
+  container:
+    purpose: "Deploy as Docker container"
+    requirements: ["docker"]
+
+# AI Generation Rules (CRITICAL)
+ai_rules:
+  - "Always start files with ---"
+  - "Always include file header comment with purpose"
+  - "Use 2-space indentation, never tabs"
+  - "Follow snake_case naming for variables"
+  - "Quote strings with special characters"
+  - "CI must always have Build → Test → SAST → Publish stages in that order"
+  - "SAST must always include all three tools: gitleaks, semgrep, trivy"
+  - "CD must always download artifact then deploy"
+  - "Use tool-specific syntax for each CI/CD platform"
+  - "Include comments for each major section"
+  - "Set continueOnError: true for SAST tools"
+  - "Publish SAST reports as artifacts"
+  - "Use environment-specific variables"
+  - "Include smoke tests for web deployments"
+  - "Add health checks for service deployments"
+
+# File naming convention
+file_naming:
+  ci_files: "{language}-ci.yml"     # Example: dotnet-ci.yml
+  cd_files: "{language}-{target}-cd.yml"  # Example: dotnet-webapp-cd.yml
