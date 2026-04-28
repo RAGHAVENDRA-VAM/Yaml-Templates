@@ -1,0 +1,102 @@
+---
+# yaml-templates/gitlab-ci/ci/go-ci.yml
+# Purpose: GitLab CI pipeline for Go applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+variables:
+  GO_VERSION: "1.21"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+stages:
+  - build
+  - test
+  - sast
+  - publish
+
+# Build Stage
+build:
+  stage: build
+  image: golang:$GO_VERSION
+  cache:
+    paths:
+      - .cache
+  before_script:
+    - mkdir -p .cache
+    - export GOPATH="$CI_PROJECT_DIR/.cache"
+  script:
+    - go mod download
+    - go build -o bin/app ./...
+  artifacts:
+    paths:
+      - bin/
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Test Stage
+test:
+  stage: test
+  image: golang:$GO_VERSION
+  dependencies:
+    - build
+  cache:
+    paths:
+      - .cache
+  before_script:
+    - mkdir -p .cache
+    - export GOPATH="$CI_PROJECT_DIR/.cache"
+  script:
+    - go test -v -race -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.out
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Security Scan Stage
+sast:
+  stage: sast
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - test
+  script:
+    # Gitleaks — Secret Detection
+    - docker run --rm -v $PWD:/path zricethezav/gitleaks:latest detect --source="/path" --verbose || true
+    # Semgrep — Code Analysis
+    - docker run --rm -v $PWD:/src returntocorp/semgrep --config=auto /src || true
+    # Trivy — Dependency Scan
+    - docker run --rm -v $PWD:/workspace aquasec/trivy fs /workspace || true
+  allow_failure: true
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# Publish Stage
+publish:
+  stage: publish
+  image: alpine:latest
+  dependencies:
+    - build
+  script:
+    - echo "Publishing $ARTIFACT_NAME"
+  artifacts:
+    name: "$ARTIFACT_NAME"
+    paths:
+      - bin/
+    expire_in: 1 week
+  only:
+    - main
+    - develop

@@ -1,0 +1,122 @@
+---
+# yaml-templates/github-actions/ci/php-ci.yml
+# Purpose: GitHub Actions CI workflow for PHP applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+name: "PHP CI Pipeline"
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+env:
+  PHP_VERSION: "8.2"
+  PROJECT_NAME: "${{ github.event.repository.name }}"
+  ARTIFACT_NAME: "${{ github.event.repository.name }}-drop"
+
+jobs:
+  build:
+    name: "Build PHP Application"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Setup PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "${{ env.PHP_VERSION }}"
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite
+          coverage: xdebug
+
+      - name: "Cache Composer"
+        uses: actions/cache@v3
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+
+      - name: "Install Dependencies"
+        run: "composer install --no-dev --optimize-autoloader"
+
+      - name: "Upload Build Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "build-output"
+          path: "./"
+          exclude: |
+            .git
+            tests
+            .github
+
+  test:
+    name: "Run Tests"
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Setup PHP"
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "${{ env.PHP_VERSION }}"
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite
+          coverage: xdebug
+
+      - name: "Install Dependencies"
+        run: "composer install"
+
+      - name: "Run PHPUnit Tests"
+        run: "vendor/bin/phpunit --coverage-clover=coverage.xml"
+
+      - name: "Upload Coverage"
+        uses: codecov/codecov-action@v3
+        with:
+          file: coverage.xml
+
+  sast:
+    name: "Security Scan"
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Gitleaks — Secret Detection"
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: "Semgrep — Code Analysis"
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "auto"
+
+      - name: "Trivy — Dependency Scan"
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+
+  publish:
+    name: "Publish Artifact"
+    runs-on: ubuntu-latest
+    needs: sast
+    steps:
+      - name: "Download Build Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "build-output"
+          path: "./"
+
+      - name: "Publish ${{ env.ARTIFACT_NAME }}"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.ARTIFACT_NAME }}"
+          path: "./"

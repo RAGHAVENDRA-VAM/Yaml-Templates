@@ -1,0 +1,134 @@
+---
+# yaml-templates/jenkins/cd/react-cd.yml
+# Purpose: Jenkins CD pipeline for React applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Web App, S3, Static hosting
+
+pipeline {
+    agent any
+    
+    environment {
+        AZURE_WEBAPP_NAME = 'my-react-app'
+        AZURE_WEBAPP_PACKAGE_PATH = './build'
+        NODE_VERSION = '20.x'
+    }
+    
+    tools {
+        nodejs "${NODE_VERSION}"
+    }
+    
+    stages {
+        stage('Download Artifacts') {
+            steps {
+                echo 'Downloading build artifacts from CI pipeline'
+                copyArtifacts(
+                    projectName: 'React-CI-Pipeline',
+                    selector: lastSuccessful(),
+                    target: './build'
+                )
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            environment {
+                AZURE_CREDENTIALS = credentials('azure-service-principal')
+            }
+            steps {
+                echo 'Deploying to Staging Environment'
+                
+                script {
+                    // Deploy to Azure Static Web Apps
+                    sh '''
+                        npm install -g @azure/static-web-apps-cli
+                        swa deploy ./build --env staging --deployment-token ${AZURE_SWA_TOKEN_STAGING}
+                    '''
+                }
+                
+                // Verify staging deployment
+                script {
+                    def response = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' https://${AZURE_WEBAPP_NAME}-staging.azurestaticapps.net",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (response != '200') {
+                        error("Staging deployment verification failed. HTTP status: ${response}")
+                    }
+                }
+            }
+        }
+        
+        stage('Approval for Production') {
+            steps {
+                script {
+                    def userInput = input(
+                        id: 'Proceed',
+                        message: 'Deploy to Production?',
+                        parameters: [
+                            choice(
+                                choices: ['Yes', 'No'],
+                                description: 'Proceed with production deployment?',
+                                name: 'PROCEED'
+                            )
+                        ]
+                    )
+                    
+                    if (userInput != 'Yes') {
+                        error('Production deployment cancelled by user')
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            environment {
+                AZURE_CREDENTIALS = credentials('azure-service-principal')
+            }
+            steps {
+                echo 'Deploying to Production Environment'
+                
+                script {
+                    // Deploy to Azure Static Web Apps
+                    sh '''
+                        npm install -g @azure/static-web-apps-cli
+                        swa deploy ./build --env production --deployment-token ${AZURE_SWA_TOKEN}
+                    '''
+                }
+                
+                // Verify production deployment
+                script {
+                    def response = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' https://${AZURE_WEBAPP_NAME}.azurestaticapps.net",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (response != '200') {
+                        error("Production deployment verification failed. HTTP status: ${response}")
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Deployment completed successfully!'
+            emailext (
+                subject: "Deployment Success: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "The React application has been successfully deployed to production.",
+                to: "${env.CHANGE_AUTHOR_EMAIL}"
+            )
+        }
+        failure {
+            echo 'Deployment failed!'
+            emailext (
+                subject: "Deployment Failed: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "The React application deployment has failed. Please check the logs.",
+                to: "${env.CHANGE_AUTHOR_EMAIL}"
+            )
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

@@ -1,0 +1,133 @@
+---
+# yaml-templates/azure-devops/ci/rust-ci.yml
+# Purpose: Azure DevOps CI pipeline for Rust applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  rustVersion: 'stable'
+  projectName: '$(Build.Repository.Name)'
+  artifactName: '$(Build.Repository.Name)-drop'
+
+stages:
+- stage: Build
+  displayName: 'Build Rust Application'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source ~/.cargo/env
+        rustup component add rustfmt clippy
+      displayName: 'Setup Rust'
+
+    - task: Cache@2
+      displayName: 'Cache Cargo'
+      inputs:
+        key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+        restoreKeys: |
+          cargo | "$(Agent.OS)"
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+
+    - script: |
+        source ~/.cargo/env
+        cargo build --release
+      displayName: 'Build Application'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Build Artifact'
+      inputs:
+        pathToPublish: 'target/release'
+        artifactName: 'build-output'
+
+- stage: Test
+  displayName: 'Run Tests'
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    displayName: 'Test'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source ~/.cargo/env
+        rustup component add rustfmt clippy
+      displayName: 'Setup Rust'
+
+    - script: |
+        source ~/.cargo/env
+        cargo test --verbose
+      displayName: 'Run Unit Tests'
+
+    - script: |
+        source ~/.cargo/env
+        cargo clippy -- -D warnings
+      displayName: 'Run Clippy'
+
+    - script: |
+        source ~/.cargo/env
+        cargo fmt -- --check
+      displayName: 'Check Formatting'
+
+- stage: SAST
+  displayName: 'Security Scan'
+  dependsOn: Test
+  jobs:
+  - job: SecurityJob
+    displayName: 'Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/path zricethezav/gitleaks:latest detect --source="/path" --verbose
+      displayName: 'Gitleaks — Secret Detection'
+      continueOnError: true
+
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/src returntocorp/semgrep --config=auto /src
+      displayName: 'Semgrep — Code Analysis'
+      continueOnError: true
+
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/workspace aquasec/trivy fs /workspace
+      displayName: 'Trivy — Dependency Scan'
+      continueOnError: true
+
+- stage: Publish
+  displayName: 'Publish Artifact'
+  dependsOn: SAST
+  jobs:
+  - job: PublishJob
+    displayName: 'Publish'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Build Artifact'
+      inputs:
+        artifactName: 'build-output'
+        downloadPath: '$(System.ArtifactsDirectory)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish $(artifactName)'
+      inputs:
+        pathToPublish: '$(System.ArtifactsDirectory)/build-output'
+        artifactName: '$(artifactName)'

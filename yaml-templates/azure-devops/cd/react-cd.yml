@@ -1,0 +1,109 @@
+---
+# yaml-templates/azure-devops/cd/react-cd.yml
+# Purpose: Azure DevOps CD pipeline for React applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Web App, Static Web Apps
+
+trigger: none
+
+resources:
+  pipelines:
+  - pipeline: ReactCI
+    source: 'React CI Pipeline'
+    trigger:
+      branches:
+        include:
+        - main
+
+variables:
+  azureWebAppName: 'my-react-app'
+  azureWebAppPackagePath: './build'
+  nodeVersion: '20.x'
+
+stages:
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToStaging
+    displayName: 'Deploy to Staging Environment'
+    environment: 'staging'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Build Artifact'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: 'ReactCI'
+              buildVersionToDownload: 'latest'
+              artifactName: '$(Build.Repository.Name)-drop'
+              targetPath: '$(Pipeline.Workspace)/build'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App Staging'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              appType: 'webApp'
+              appName: '$(azureWebAppName)-staging'
+              package: '$(Pipeline.Workspace)/build'
+              deploymentMethod: 'auto'
+
+          - task: PowerShell@2
+            displayName: 'Verify Deployment'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $response = Invoke-WebRequest -Uri "https://$(azureWebAppName)-staging.azurewebsites.net" -UseBasicParsing
+                if ($response.StatusCode -ne 200) {
+                  Write-Error "Deployment verification failed"
+                  exit 1
+                }
+
+- stage: DeployProduction
+  displayName: 'Deploy to Production'
+  dependsOn: DeployStaging
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToProduction
+    displayName: 'Deploy to Production Environment'
+    environment: 'production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Build Artifact'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: 'ReactCI'
+              buildVersionToDownload: 'latest'
+              artifactName: '$(Build.Repository.Name)-drop'
+              targetPath: '$(Pipeline.Workspace)/build'
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy to Azure Web App Production'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              appType: 'webApp'
+              appName: '$(azureWebAppName)'
+              package: '$(Pipeline.Workspace)/build'
+              deploymentMethod: 'auto'
+
+          - task: PowerShell@2
+            displayName: 'Verify Production Deployment'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $response = Invoke-WebRequest -Uri "https://$(azureWebAppName).azurewebsites.net" -UseBasicParsing
+                if ($response.StatusCode -ne 200) {
+                  Write-Error "Production deployment verification failed"
+                  exit 1
+                }

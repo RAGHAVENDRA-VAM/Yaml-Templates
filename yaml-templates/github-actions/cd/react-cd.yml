@@ -1,0 +1,67 @@
+---
+# yaml-templates/github-actions/cd/react-cd.yml
+# Purpose: GitHub Actions CD workflow for React applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Web App, S3, or any static hosting
+
+name: "React CD Pipeline"
+
+on:
+  workflow_run:
+    workflows: ["React CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  AZURE_WEBAPP_NAME: "my-react-app"
+  AZURE_WEBAPP_PACKAGE_PATH: "./build"
+  NODE_VERSION: "20.x"
+
+jobs:
+  deploy-staging:
+    name: "Deploy to Staging"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: staging
+    steps:
+      - name: "Download Build Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ github.event.repository.name }}-drop"
+          path: "./build"
+
+      - name: "Deploy to Azure Web App"
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: "${{ env.AZURE_WEBAPP_NAME }}-staging"
+          publish-profile: "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_STAGING }}"
+          package: "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}"
+
+      - name: "Verify Deployment"
+        run: |
+          curl -f https://${{ env.AZURE_WEBAPP_NAME }}-staging.azurewebsites.net || exit 1
+
+  deploy-production:
+    name: "Deploy to Production"
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production
+    steps:
+      - name: "Download Build Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ github.event.repository.name }}-drop"
+          path: "./build"
+
+      - name: "Deploy to Azure Web App"
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: "${{ env.AZURE_WEBAPP_NAME }}"
+          publish-profile: "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}"
+          package: "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}"
+
+      - name: "Verify Production Deployment"
+        run: |
+          curl -f https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net || exit 1

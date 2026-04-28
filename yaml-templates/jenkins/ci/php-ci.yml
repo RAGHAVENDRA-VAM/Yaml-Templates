@@ -1,0 +1,99 @@
+---
+# yaml-templates/jenkins/ci/php-ci.yml
+# Purpose: Jenkins CI pipeline for PHP applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+pipeline {
+    agent any
+    
+    environment {
+        PHP_VERSION = '8.2'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Building PHP Application'
+                sh 'php -v'
+                sh 'composer install --no-dev --optimize-autoloader'
+                archiveArtifacts artifacts: '**', excludes: '.git/**,tests/**,.github/**', fingerprint: true
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo 'Running Tests'
+                sh 'composer install'
+                sh 'vendor/bin/phpunit --coverage-clover=coverage.xml'
+                publishHTML([
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'coverage',
+                    reportFiles: 'index.html',
+                    reportName: 'Coverage Report'
+                ])
+            }
+        }
+        
+        stage('SAST') {
+            parallel {
+                stage('Gitleaks') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/path zricethezav/gitleaks:latest detect --source="/path" --verbose'
+                            } catch (Exception e) {
+                                echo "Gitleaks scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+                stage('Semgrep') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/src returntocorp/semgrep --config=auto /src'
+                            } catch (Exception e) {
+                                echo "Semgrep scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+                stage('Trivy') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/workspace aquasec/trivy fs /workspace'
+                            } catch (Exception e) {
+                                echo "Trivy scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Publish') {
+            steps {
+                echo "Publishing ${ARTIFACT_NAME}"
+                archiveArtifacts artifacts: '**', excludes: '.git/**,tests/**', fingerprint: true, allowEmptyArchive: false
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}

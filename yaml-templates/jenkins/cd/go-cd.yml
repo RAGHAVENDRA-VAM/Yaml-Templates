@@ -1,0 +1,156 @@
+---
+# yaml-templates/jenkins/cd/go-cd.yml
+# Purpose: Jenkins CD pipeline for Go applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Container Apps, Kubernetes
+
+pipeline {
+    agent any
+    
+    environment {
+        AZURE_WEBAPP_NAME = 'my-go-app'
+        CONTAINER_REGISTRY = 'myregistry.azurecr.io'
+        IMAGE_NAME = 'go-app'
+        GO_VERSION = '1.21'
+    }
+    
+    tools {
+        go "${GO_VERSION}"
+    }
+    
+    stages {
+        stage('Download Artifacts') {
+            steps {
+                echo 'Downloading build artifacts from CI pipeline'
+                copyArtifacts(
+                    projectName: 'Go-CI-Pipeline',
+                    selector: lastSuccessful(),
+                    target: './bin'
+                )
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker image'
+                script {
+                    def image = docker.build("${CONTAINER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}")
+                    
+                    docker.withRegistry("https://${CONTAINER_REGISTRY}", 'azure-container-registry') {
+                        image.push()
+                        image.push('latest')
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            environment {
+                AZURE_CREDENTIALS = credentials('azure-service-principal')
+            }
+            steps {
+                echo 'Deploying to Staging Environment'
+                
+                script {
+                    // Deploy to Azure Container Apps
+                    sh '''
+                        az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                        az containerapp update \\
+                            --name ${AZURE_WEBAPP_NAME}-staging \\
+                            --resource-group ${AZURE_RESOURCE_GROUP} \\
+                            --image ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}
+                    '''
+                }
+                
+                // Verify staging deployment
+                script {
+                    sleep(30) // Wait for deployment to complete
+                    def response = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' https://${AZURE_WEBAPP_NAME}-staging.azurecontainerapps.io/health",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (response != '200') {
+                        error("Staging deployment verification failed. HTTP status: ${response}")
+                    }
+                }
+            }
+        }
+        
+        stage('Approval for Production') {
+            steps {
+                script {
+                    def userInput = input(
+                        id: 'Proceed',
+                        message: 'Deploy to Production?',
+                        parameters: [
+                            choice(
+                                choices: ['Yes', 'No'],
+                                description: 'Proceed with production deployment?',
+                                name: 'PROCEED'
+                            )
+                        ]
+                    )
+                    
+                    if (userInput != 'Yes') {
+                        error('Production deployment cancelled by user')
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            environment {
+                AZURE_CREDENTIALS = credentials('azure-service-principal')
+            }
+            steps {
+                echo 'Deploying to Production Environment'
+                
+                script {
+                    // Deploy to Azure Container Apps
+                    sh '''
+                        az containerapp update \\
+                            --name ${AZURE_WEBAPP_NAME} \\
+                            --resource-group ${AZURE_RESOURCE_GROUP} \\
+                            --image ${CONTAINER_REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}
+                    '''
+                }
+                
+                // Verify production deployment
+                script {
+                    sleep(30) // Wait for deployment to complete
+                    def response = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' https://${AZURE_WEBAPP_NAME}.azurecontainerapps.io/health",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (response != '200') {
+                        error("Production deployment verification failed. HTTP status: ${response}")
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Deployment completed successfully!'
+            emailext (
+                subject: "Deployment Success: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "The Go application has been successfully deployed to production.",
+                to: "${env.CHANGE_AUTHOR_EMAIL}"
+            )
+        }
+        failure {
+            echo 'Deployment failed!'
+            emailext (
+                subject: "Deployment Failed: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                body: "The Go application deployment has failed. Please check the logs.",
+                to: "${env.CHANGE_AUTHOR_EMAIL}"
+            )
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

@@ -1,0 +1,103 @@
+---
+# yaml-templates/azure-devops/cd/go-cd.yml
+# Purpose: Azure DevOps CD pipeline for Go applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Container Apps, AKS
+
+trigger: none
+
+resources:
+  pipelines:
+  - pipeline: GoCI
+    source: 'Go CI Pipeline'
+    trigger:
+      branches:
+        include:
+        - main
+
+variables:
+  azureWebAppName: 'my-go-app'
+  containerRegistry: 'myregistry.azurecr.io'
+  imageName: 'go-app'
+
+stages:
+- stage: DeployStaging
+  displayName: 'Deploy to Staging'
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToStaging
+    displayName: 'Deploy to Staging Environment'
+    environment: 'staging'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Build Artifact'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: 'GoCI'
+              buildVersionToDownload: 'latest'
+              artifactName: '$(Build.Repository.Name)-drop'
+              targetPath: '$(Pipeline.Workspace)/bin'
+
+          - task: Docker@2
+            displayName: 'Build and Push Docker Image'
+            inputs:
+              containerRegistry: '$(dockerRegistryServiceConnection)'
+              repository: '$(imageName)'
+              command: 'buildAndPush'
+              Dockerfile: '**/Dockerfile'
+              tags: 'staging-$(Build.BuildId)'
+
+          - task: AzureContainerApps@1
+            displayName: 'Deploy to Azure Container Apps'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              containerAppName: '$(azureWebAppName)-staging'
+              resourceGroup: '$(resourceGroupName)'
+              imageToDeploy: '$(containerRegistry)/$(imageName):staging-$(Build.BuildId)'
+
+- stage: DeployProduction
+  displayName: 'Deploy to Production'
+  dependsOn: DeployStaging
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToProduction
+    displayName: 'Deploy to Production Environment'
+    environment: 'production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Build Artifact'
+            inputs:
+              buildType: 'specific'
+              project: '$(System.TeamProjectId)'
+              definition: 'GoCI'
+              buildVersionToDownload: 'latest'
+              artifactName: '$(Build.Repository.Name)-drop'
+              targetPath: '$(Pipeline.Workspace)/bin'
+
+          - task: Docker@2
+            displayName: 'Build and Push Docker Image'
+            inputs:
+              containerRegistry: '$(dockerRegistryServiceConnection)'
+              repository: '$(imageName)'
+              command: 'buildAndPush'
+              Dockerfile: '**/Dockerfile'
+              tags: '$(Build.BuildId)'
+
+          - task: AzureContainerApps@1
+            displayName: 'Deploy to Azure Container Apps'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              containerAppName: '$(azureWebAppName)'
+              resourceGroup: '$(resourceGroupName)'
+              imageToDeploy: '$(containerRegistry)/$(imageName):$(Build.BuildId)'

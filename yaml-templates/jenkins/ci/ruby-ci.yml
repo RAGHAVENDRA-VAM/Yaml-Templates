@@ -1,0 +1,94 @@
+---
+# yaml-templates/jenkins/ci/ruby-ci.yml
+# Purpose: Jenkins CI pipeline for Ruby applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+pipeline {
+    agent any
+    
+    environment {
+        RUBY_VERSION = '3.2'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Building Ruby Application'
+                sh 'ruby -v'
+                sh 'bundle config set --local path vendor/bundle'
+                sh 'bundle install --jobs 4 --retry 3'
+                archiveArtifacts artifacts: '**', excludes: '.git/**,spec/**,test/**,.github/**', fingerprint: true
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo 'Running Tests'
+                sh 'bundle install'
+                sh 'bundle exec rspec --format RspecJunitFormatter --out rspec.xml'
+                sh 'bundle exec rubocop'
+                publishTestResults testResultsPattern: 'rspec.xml'
+            }
+        }
+        
+        stage('SAST') {
+            parallel {
+                stage('Gitleaks') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/path zricethezav/gitleaks:latest detect --source="/path" --verbose'
+                            } catch (Exception e) {
+                                echo "Gitleaks scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+                stage('Semgrep') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/src returntocorp/semgrep --config=auto /src'
+                            } catch (Exception e) {
+                                echo "Semgrep scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+                stage('Trivy') {
+                    steps {
+                        script {
+                            try {
+                                sh 'docker run --rm -v ${WORKSPACE}:/workspace aquasec/trivy fs /workspace'
+                            } catch (Exception e) {
+                                echo "Trivy scan completed with findings: ${e.getMessage()}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Publish') {
+            steps {
+                echo "Publishing ${ARTIFACT_NAME}"
+                archiveArtifacts artifacts: '**', excludes: '.git/**,spec/**,test/**', fingerprint: true, allowEmptyArchive: false
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}

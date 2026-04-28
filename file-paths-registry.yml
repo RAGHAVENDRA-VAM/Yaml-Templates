@@ -31,11 +31,18 @@ cicd_tools:
       node: "yaml-templates/azure-devops/ci/node-ci.yml"
       python: "yaml-templates/azure-devops/ci/python-ci.yml"
       java: "yaml-templates/azure-devops/ci/java-ci.yml"
+      react: "yaml-templates/azure-devops/ci/react-ci.yml"
+      go: "yaml-templates/azure-devops/ci/go-ci.yml"
+      rust: "yaml-templates/azure-devops/ci/rust-ci.yml"
+      php: "yaml-templates/azure-devops/ci/php-ci.yml"
+      ruby: "yaml-templates/azure-devops/ci/ruby-ci.yml"
     cd_templates:
       webapp: "yaml-templates/azure-devops/cd/webapp-cd.yml"
       aks: "yaml-templates/azure-devops/cd/aks-cd.yml"
       vm: "yaml-templates/azure-devops/cd/vm-cd.yml"
       container: "yaml-templates/azure-devops/cd/container-cd.yml"
+      react: "yaml-templates/azure-devops/cd/react-cd.yml"
+      go: "yaml-templates/azure-devops/cd/go-cd.yml"
   
   # GitHub Actions Templates
   github_actions:
@@ -44,11 +51,27 @@ cicd_tools:
       node: "yaml-templates/github-actions/ci/node-ci.yml"
       python: "yaml-templates/github-actions/ci/python-ci.yml"
       java: "yaml-templates/github-actions/ci/java-ci.yml"
+      react: "yaml-templates/github-actions/ci/react-ci.yml"
+      go: "yaml-templates/github-actions/ci/go-ci.yml"
+      rust: "yaml-templates/github-actions/ci/rust-ci.yml"
+      php: "yaml-templates/github-actions/ci/php-ci.yml"
+      ruby: "yaml-templates/github-actions/ci/ruby-ci.yml"
+      typescript: "yaml-templates/github-actions/ci/typescript-ci.yml"
+      angular: "yaml-templates/github-actions/ci/angular-ci.yml"
+      vue: "yaml-templates/github-actions/ci/vue-ci.yml"
     cd_templates:
       webapp: "yaml-templates/github-actions/cd/webapp-cd.yml"
       aks: "yaml-templates/github-actions/cd/aks-cd.yml"
       vm: "yaml-templates/github-actions/cd/vm-cd.yml"
       container: "yaml-templates/github-actions/cd/container-cd.yml"
+      react: "yaml-templates/github-actions/cd/react-cd.yml"
+      go: "yaml-templates/github-actions/cd/go-cd.yml"
+      rust: "yaml-templates/github-actions/cd/rust-cd.yml"
+      php: "yaml-templates/github-actions/cd/php-cd.yml"
+      ruby: "yaml-templates/github-actions/cd/ruby-cd.yml"
+      typescript: "yaml-templates/github-actions/cd/typescript-cd.yml"
+      angular: "yaml-templates/github-actions/cd/angular-cd.yml"
+      vue: "yaml-templates/github-actions/cd/vue-cd.yml"
   
   # GitLab CI Templates
   gitlab_ci:
@@ -57,6 +80,11 @@ cicd_tools:
       node: "yaml-templates/gitlab-ci/ci/node-ci.yml"
       python: "yaml-templates/gitlab-ci/ci/python-ci.yml"
       java: "yaml-templates/gitlab-ci/ci/java-ci.yml"
+      react: "yaml-templates/gitlab-ci/ci/react-ci.yml"
+      go: "yaml-templates/gitlab-ci/ci/go-ci.yml"
+      rust: "yaml-templates/gitlab-ci/ci/rust-ci.yml"
+      php: "yaml-templates/gitlab-ci/ci/php-ci.yml"
+      ruby: "yaml-templates/gitlab-ci/ci/ruby-ci.yml"
     cd_templates:
       webapp: "yaml-templates/gitlab-ci/cd/webapp-cd.yml"
       aks: "yaml-templates/gitlab-ci/cd/aks-cd.yml"
@@ -70,6 +98,11 @@ cicd_tools:
       node: "yaml-templates/jenkins/ci/node-ci.yml"
       python: "yaml-templates/jenkins/ci/python-ci.yml"
       java: "yaml-templates/jenkins/ci/java-ci.yml"
+      react: "yaml-templates/jenkins/ci/react-ci.yml"
+      go: "yaml-templates/jenkins/ci/go-ci.yml"
+      rust: "yaml-templates/jenkins/ci/rust-ci.yml"
+      php: "yaml-templates/jenkins/ci/php-ci.yml"
+      ruby: "yaml-templates/jenkins/ci/ruby-ci.yml"
     cd_templates:
       webapp: "yaml-templates/jenkins/cd/webapp-cd.yml"
       aks: "yaml-templates/jenkins/cd/aks-cd.yml"
@@ -127,18 +160,18 @@ template_categories:
 
 # File Statistics
 file_statistics:
-  total_files: 40
-  ci_templates: 16  # 4 tools × 4 languages
-  cd_templates: 16  # 4 tools × 4 deploy targets
+  total_files: 80+
+  ci_templates: 44  # Multiple tools × multiple languages
+  cd_templates: 28+  # Multiple tools × multiple deployment targets
   reference_files: 1
   global_templates: 2
   documentation_files: 4
   
   by_tool:
-    azure_devops: 8  # 4 CI + 4 CD
-    github_actions: 8  # 4 CI + 4 CD
-    gitlab_ci: 8  # 4 CI + 4 CD
-    jenkins: 8  # 4 CI + 4 CD
+    azure_devops: 15+  # 9 CI + 6+ CD
+    github_actions: 24+  # 12 CI + 12+ CD
+    gitlab_ci: 17+  # 9 CI + 8+ CD
+    jenkins: 17+  # 9 CI + 8+ CD
   
   by_language:
     dotnet: 4  # 1 per tool

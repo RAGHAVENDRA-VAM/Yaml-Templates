@@ -1,0 +1,89 @@
+---
+# yaml-templates/github-actions/cd/go-cd.yml
+# Purpose: GitHub Actions CD workflow for Go applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Container Apps, AKS, or VM
+
+name: "Go CD Pipeline"
+
+on:
+  workflow_run:
+    workflows: ["Go CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  AZURE_WEBAPP_NAME: "my-go-app"
+  CONTAINER_REGISTRY: "myregistry.azurecr.io"
+  IMAGE_NAME: "go-app"
+
+jobs:
+  deploy-staging:
+    name: "Deploy to Staging"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: staging
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Download Build Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ github.event.repository.name }}-drop"
+          path: "./bin"
+
+      - name: "Login to Azure Container Registry"
+        uses: azure/docker-login@v1
+        with:
+          login-server: "${{ env.CONTAINER_REGISTRY }}"
+          username: "${{ secrets.ACR_USERNAME }}"
+          password: "${{ secrets.ACR_PASSWORD }}"
+
+      - name: "Build and Push Docker Image"
+        run: |
+          docker build -t ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }} .
+          docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
+
+      - name: "Deploy to Azure Container Apps"
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          containerAppName: "${{ env.AZURE_WEBAPP_NAME }}-staging"
+          resourceGroup: "${{ secrets.AZURE_RESOURCE_GROUP }}"
+          imageToDeploy: "${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}"
+
+  deploy-production:
+    name: "Deploy to Production"
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Download Build Artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ github.event.repository.name }}-drop"
+          path: "./bin"
+
+      - name: "Login to Azure Container Registry"
+        uses: azure/docker-login@v1
+        with:
+          login-server: "${{ env.CONTAINER_REGISTRY }}"
+          username: "${{ secrets.ACR_USERNAME }}"
+          password: "${{ secrets.ACR_PASSWORD }}"
+
+      - name: "Build and Push Docker Image"
+        run: |
+          docker build -t ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: "Deploy to Azure Container Apps"
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          containerAppName: "${{ env.AZURE_WEBAPP_NAME }}"
+          resourceGroup: "${{ secrets.AZURE_RESOURCE_GROUP }}"
+          imageToDeploy: "${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"

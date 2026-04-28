@@ -1,0 +1,65 @@
+---
+# yaml-templates/gitlab-ci/cd/go-cd.yml
+# Purpose: GitLab CI CD pipeline for Go applications.
+# Stages: Download → Deploy → Verify
+# Targets: Azure Container Apps, Kubernetes
+
+variables:
+  AZURE_WEBAPP_NAME: "my-go-app"
+  CONTAINER_REGISTRY: "myregistry.azurecr.io"
+  IMAGE_NAME: "go-app"
+  GO_VERSION: "1.21"
+
+stages:
+  - deploy-staging
+  - deploy-production
+
+# Deploy to Staging
+deploy_staging:
+  stage: deploy-staging
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build  # From CI pipeline
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Building and deploying to staging"
+    - docker build -t $CONTAINER_REGISTRY/$IMAGE_NAME:staging-$CI_COMMIT_SHA .
+    - docker push $CONTAINER_REGISTRY/$IMAGE_NAME:staging-$CI_COMMIT_SHA
+    # Deploy to Azure Container Apps (using Azure CLI)
+    - az containerapp update --name $AZURE_WEBAPP_NAME-staging --resource-group $AZURE_RESOURCE_GROUP --image $CONTAINER_REGISTRY/$IMAGE_NAME:staging-$CI_COMMIT_SHA
+  environment:
+    name: staging
+    url: https://$AZURE_WEBAPP_NAME-staging.azurecontainerapps.io
+  only:
+    - main
+  when: manual
+
+# Deploy to Production
+deploy_production:
+  stage: deploy-production
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build  # From CI pipeline
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Building and deploying to production"
+    - docker build -t $CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA .
+    - docker push $CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA
+    # Deploy to Azure Container Apps
+    - az containerapp update --name $AZURE_WEBAPP_NAME --resource-group $AZURE_RESOURCE_GROUP --image $CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA
+    # Verify deployment
+    - curl -f https://$AZURE_WEBAPP_NAME.azurecontainerapps.io/health || exit 1
+  environment:
+    name: production
+    url: https://$AZURE_WEBAPP_NAME.azurecontainerapps.io
+  only:
+    - main
+  when: manual
+  needs:
+    - deploy_staging

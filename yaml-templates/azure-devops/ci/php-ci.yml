@@ -1,0 +1,123 @@
+---
+# yaml-templates/azure-devops/ci/php-ci.yml
+# Purpose: Azure DevOps CI pipeline for PHP applications.
+# Jobs: Build → Test → SAST → Publish
+# Tools: Gitleaks, Semgrep, Trivy for security scanning
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  phpVersion: '8.2'
+  projectName: '$(Build.Repository.Name)'
+  artifactName: '$(Build.Repository.Name)-drop'
+
+stages:
+- stage: Build
+  displayName: 'Build PHP Application'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        sudo update-alternatives --set php /usr/bin/php$(phpVersion)
+        php -v
+      displayName: 'Setup PHP'
+
+    - task: Cache@2
+      displayName: 'Cache Composer'
+      inputs:
+        key: 'composer | "$(Agent.OS)" | composer.lock'
+        restoreKeys: |
+          composer | "$(Agent.OS)"
+        path: ~/.composer/cache
+
+    - script: composer install --no-dev --optimize-autoloader
+      displayName: 'Install Dependencies'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Build Artifact'
+      inputs:
+        pathToPublish: '$(Build.SourcesDirectory)'
+        artifactName: 'build-output'
+
+- stage: Test
+  displayName: 'Run Tests'
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    displayName: 'Test'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        sudo update-alternatives --set php /usr/bin/php$(phpVersion)
+        php -v
+      displayName: 'Setup PHP'
+
+    - script: composer install
+      displayName: 'Install Dependencies'
+
+    - script: vendor/bin/phpunit --coverage-clover=coverage.xml
+      displayName: 'Run PHPUnit Tests'
+
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish Coverage'
+      inputs:
+        codeCoverageTool: 'Clover'
+        summaryFileLocation: 'coverage.xml'
+
+- stage: SAST
+  displayName: 'Security Scan'
+  dependsOn: Test
+  jobs:
+  - job: SecurityJob
+    displayName: 'Security'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/path zricethezav/gitleaks:latest detect --source="/path" --verbose
+      displayName: 'Gitleaks — Secret Detection'
+      continueOnError: true
+
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/src returntocorp/semgrep --config=auto /src
+      displayName: 'Semgrep — Code Analysis'
+      continueOnError: true
+
+    - script: |
+        docker run --rm -v $(Build.SourcesDirectory):/workspace aquasec/trivy fs /workspace
+      displayName: 'Trivy — Dependency Scan'
+      continueOnError: true
+
+- stage: Publish
+  displayName: 'Publish Artifact'
+  dependsOn: SAST
+  jobs:
+  - job: PublishJob
+    displayName: 'Publish'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Build Artifact'
+      inputs:
+        artifactName: 'build-output'
+        downloadPath: '$(System.ArtifactsDirectory)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish $(artifactName)'
+      inputs:
+        pathToPublish: '$(System.ArtifactsDirectory)/build-output'
+        artifactName: '$(artifactName)'
