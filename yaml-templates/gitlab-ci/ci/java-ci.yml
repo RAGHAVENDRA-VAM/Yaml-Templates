@@ -1,96 +1,67 @@
 ---
-# yaml-templates/gitlab-ci/ci/java-ci.yml
-# Purpose: GitLab CI pipeline for Java applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
-
-variables:
-  JAVA_VERSION: "21"
-  PROJECT_NAME: "$CI_PROJECT_NAME"
-  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
-  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
-
-cache:
-  paths:
-    - .m2/repository/
+# GitLab CI Pipeline for Java Applications
+# Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 stages:
   - build
-  - test
   - sast
   - publish
 
-# Stage 1: Build — Build Java application
-build_java:
-  stage: build
-  image: openjdk:21-jdk-slim
-  before_script:
-    - apt-get update && apt-get install -y maven
-  script:
-    - mvn clean package -DskipTests --batch-mode
-  artifacts:
-    paths:
-      - target/
-    expire_in: 1 hour
+variables:
+  JAVA_VERSION: "17"
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
 
-# Stage 2: Test — Run unit tests
-test_java:
-  stage: test
-  image: openjdk:21-jdk-slim
-  dependencies:
-    - build_java
-  before_script:
-    - apt-get update && apt-get install -y maven
+build_stage:
+  stage: build
+  image: openjdk:17-jdk
+  cache:
+    paths:
+      - .m2/repository/
   script:
-    - mvn test --batch-mode
+    - ./mvnw clean compile
+    - ./mvnw test
   artifacts:
     reports:
-      junit: "target/surefire-reports/TEST-*.xml"
-    expire_in: 1 week
-
-# Stage 3: SAST — Security scanning (mandatory)
-sast_gitleaks:
-  stage: sast
-  image: zricethezav/gitleaks:latest
-  script:
-    - gitleaks detect --source . --verbose
-  allow_failure: true
-
-sast_semgrep:
-  stage: sast
-  image: returntocorp/semgrep:latest
-  script:
-    - semgrep scan --config auto --json --output semgrep-report.json
-  artifacts:
+      junit: target/surefire-reports/TEST-*.xml
     paths:
+      - target/
+      - .m2/repository/
+    expire_in: 1 hour
+  allow_failure: false
+
+sast_stage:
+  stage: sast
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true
+  artifacts:
+    reports:
+      sast: semgrep-report.json
+    paths:
+      - gitleaks-report.json
       - semgrep-report.json
-    expire_in: 1 week
-  allow_failure: true
-
-sast_trivy:
-  stage: sast
-  image: aquasec/trivy:latest
-  script:
-    - trivy fs . --format json --output trivy-report.json
-  artifacts:
-    paths:
       - trivy-report.json
     expire_in: 1 week
   allow_failure: true
 
-# Stage 4: Publish — Publish final artifact
-publish_java:
+publish_stage:
   stage: publish
-  image: openjdk:21-jdk-slim
-  dependencies:
-    - build_java
+  image: openjdk:17-jdk
   script:
-    - echo "Publishing $ARTIFACT_NAME"
+    - ./mvnw package -DskipTests
   artifacts:
     name: "$ARTIFACT_NAME"
     paths:
-      - target/
+      - target/*.jar
+      - target/*.war
+      - "*.yml"
+      - "*.yaml"
     expire_in: 1 week
-  only:
-    - main
-    - develop
+  dependencies:
+    - build_stage

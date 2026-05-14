@@ -1,122 +1,85 @@
 ---
-# yaml-templates/jenkins/ci/java-ci.yml
-# Purpose: Jenkins CI pipeline for Java applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+// Jenkins CI Pipeline for Java Applications
+// Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 pipeline {
-  agent any
-
-  environment {
-    JAVA_VERSION = '21'
-    MAVEN_CACHE_FOLDER = "${env.WORKSPACE}/.m2/repository"
-    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
-    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
-  }
-
-  triggers {
-    pollSCM('H/5 * * * *')
-  }
-
-  stages {
-    // Stage 1: Build — Build Java application
-    stage('Build') {
-      steps {
-        echo "Building Java application: ${env.PROJECT_NAME}"
+    agent any
+    
+    environment {
+        JAVA_VERSION = '17'
+        MAVEN_OPTS = '-Dmaven.repo.local=${WORKSPACE}/.m2/repository'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    tools {
+        jdk "${JAVA_VERSION}"
+        maven 'Maven'
+    }
+    
+    stages {
+        stage('Build Stage') {
+            steps {
+                script {
+                    sh 'mvn clean compile'
+                    sh 'mvn test'
+                }
+            }
+            post {
+                always {
+                    publishTestResults testResultsPattern: 'target/surefire-reports/TEST-*.xml'
+                }
+            }
+        }
         
-        // Install Java and Maven (if not available)
-        sh '''
-          if ! command -v java &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y openjdk-21-jdk maven
-          fi
-        '''
+        stage('SAST Stage') {
+            parallel {
+                stage('Gitleaks Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true'
+                        }
+                    }
+                }
+                stage('Semgrep Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true'
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true'
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: '*-report.json', allowEmptyArchive: true
+                }
+            }
+        }
         
-        // Build application
-        sh 'mvn clean package -DskipTests --batch-mode'
-      }
-      post {
-        success {
-          archiveArtifacts artifacts: 'target/**', fingerprint: true
+        stage('Publish Stage') {
+            steps {
+                script {
+                    sh 'mvn package -DskipTests'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'target/*.jar,target/*.war,*.yml,*.yaml', allowEmptyArchive: true
+                }
+            }
         }
-      }
     }
-
-    // Stage 2: Test — Run unit tests
-    stage('Test') {
-      steps {
-        echo "Running unit tests"
-        sh 'mvn test --batch-mode'
-      }
-      post {
+    
+    post {
         always {
-          publishTestResults testResultsPattern: 'target/surefire-reports/*.xml'
+            cleanWs()
         }
-      }
     }
-
-    // Stage 3: SAST — Security scanning (mandatory)
-    stage('SAST') {
-      parallel {
-        stage('Gitleaks') {
-          steps {
-            script {
-              try {
-                sh 'gitleaks detect --source . --verbose'
-              } catch (Exception e) {
-                echo "Gitleaks scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-        stage('Semgrep') {
-          steps {
-            script {
-              try {
-                sh 'semgrep scan --config auto --json --output semgrep-report.json'
-              } catch (Exception e) {
-                echo "Semgrep scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-        stage('Trivy') {
-          steps {
-            script {
-              try {
-                sh 'trivy fs . --format json --output trivy-report.json'
-              } catch (Exception e) {
-                echo "Trivy scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: '*-report.json', allowEmptyArchive: true
-        }
-      }
-    }
-
-    // Stage 4: Publish — Publish final artifact
-    stage('Publish') {
-      steps {
-        echo "Publishing ${env.ARTIFACT_NAME}"
-        sh 'mvn clean package -DskipTests --batch-mode'
-        archiveArtifacts artifacts: 'target/**', fingerprint: true
-      }
-    }
-  }
-
-  post {
-    always {
-      cleanWs()
-    }
-    success {
-      echo "✅ CI pipeline completed successfully"
-    }
-    failure {
-      echo "❌ CI pipeline failed"
-    }
-  }
 }

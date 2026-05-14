@@ -1,8 +1,7 @@
 ---
 # yaml-templates/github-actions/cd/aks-cd.yml
 # Purpose: GitHub Actions CD workflow for deploying to Azure Kubernetes Service.
-# Jobs: Download → Deploy
-# Target: AKS with kubectl and rollout verification
+# Stages: Deploy
 
 name: "AKS CD Pipeline"
 
@@ -16,63 +15,37 @@ on:
 
 env:
   PROJECT_NAME: "${{ github.event.repository.name }}"
-  ARTIFACT_NAME: "${{ github.event.repository.name }}-drop"
-  ENVIRONMENT: "dev"
 
 jobs:
-  # Deploy job — deploy to AKS
   deploy:
     name: "Deploy to Azure Kubernetes Service"
     runs-on: ubuntu-latest
-    environment: "${{ env.ENVIRONMENT }}"
+    environment: "production"
     if: "${{ github.event.workflow_run.conclusion == 'success' }}"
     steps:
       - name: "Checkout Code"
         uses: actions/checkout@v4
 
-      # Download artifact from CI workflow
-      - name: "Download ${{ env.ARTIFACT_NAME }}"
+      - name: "Download Build Artifact"
         uses: actions/download-artifact@v4
         with:
-          name: "${{ env.ARTIFACT_NAME }}"
-          path: "artifacts/"
+          name: "app"
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           run-id: "${{ github.event.workflow_run.id }}"
 
-      # Azure login
       - name: "Azure Login"
         uses: azure/login@v1
         with:
           creds: "${{ secrets.AZURE_CREDENTIALS }}"
 
-      # Set AKS context
       - name: "Set AKS Context"
         uses: azure/aks-set-context@v3
         with:
           resource-group: "${{ secrets.RESOURCE_GROUP }}"
           cluster-name: "${{ secrets.AKS_CLUSTER_NAME }}"
 
-      # Update image tag in deployment manifest
-      - name: "Set Image Tag"
-        run: >
-          sed -i "s|IMAGE_TAG|${{ github.run_id }}|g"
-          artifacts/manifests/deployment.yaml
-
-      # Deploy to AKS
       - name: "Deploy to AKS"
         uses: azure/k8s-deploy@v4
         with:
           namespace: "${{ secrets.AKS_NAMESPACE }}"
-          manifests: "artifacts/manifests/*.yaml"
-
-      # Verify rollout status
-      - name: "Verify Rollout"
-        run: >
-          kubectl rollout status deployment/${{ env.PROJECT_NAME }}
-          --namespace ${{ secrets.AKS_NAMESPACE }} --timeout=300s
-
-      # Get pod status
-      - name: "Get Pod Status"
-        run: >
-          kubectl get pods --namespace ${{ secrets.AKS_NAMESPACE }}
-          -l app=${{ env.PROJECT_NAME }}
+          manifests: "k8s/*.yaml"

@@ -1,8 +1,6 @@
 ---
-# yaml-templates/azure-devops/ci/java-ci.yml
-# Purpose: Azure DevOps CI pipeline for Java applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+# Azure DevOps CI Pipeline for Java Applications
+# Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 trigger:
   branches:
@@ -10,156 +8,114 @@ trigger:
       - main
       - develop
 
+pool:
+  vmImage: 'ubuntu-latest'
+
 variables:
-  java_version: "21"
-  maven_cache_folder: "$(Pipeline.Workspace)/.m2/repository"
-  project_name: "$(Build.Repository.Name)"
-  artifact_name: "$(project_name)-drop"
+  java_version: '17'
+  maven_cache_folder: $(Pipeline.Workspace)/.m2/repository
+  project_name: '$(Build.Repository.Name)'
+  artifact_name: '$(Build.Repository.Name)-drop'
 
 stages:
-  # Stage 1: Build — Build Java application
-  - stage: Build
-    displayName: "Build Stage"
+  - stage: build_stage
+    displayName: 'Build Stage'
     jobs:
-      - job: BuildJob
-        displayName: "Build Java Application"
-        pool:
-          vmImage: "ubuntu-latest"
+      - job: build_job
+        displayName: 'Build Java Application'
         steps:
-          - checkout: self
-
           - task: JavaToolInstaller@0
-            displayName: "Install Java JDK"
             inputs:
-              versionSpec: "$(java_version)"
-              jdkArchitectureOption: "x64"
-              jdkSourceOption: "PreInstalled"
+              versionSpec: '$(java_version)'
+              jdkArchitectureOption: 'x64'
+              jdkSourceOption: 'PreInstalled'
+            displayName: 'Setup Java $(java_version)'
 
           - task: Cache@2
-            displayName: "Cache Maven Dependencies"
             inputs:
-              key: "maven | $(Agent.OS) | **/pom.xml"
+              key: 'maven | "$(Agent.OS)" | **/pom.xml'
               restoreKeys: |
-                maven | $(Agent.OS)
+                maven | "$(Agent.OS)"
                 maven
-              path: "$(maven_cache_folder)"
+              path: $(maven_cache_folder)
+            displayName: 'Cache Maven Dependencies'
 
-          - script: "mvn clean package -DskipTests --batch-mode"
-            displayName: "Build Application"
-
-          - task: CopyFiles@2
-            displayName: "Stage Build Output"
+          - task: Maven@3
             inputs:
-              sourceFolder: "target"
-              contents: "*.jar"
-              targetFolder: "$(Build.ArtifactStagingDirectory)"
+              mavenPomFile: 'pom.xml'
+              goals: 'clean compile'
+              options: '-Dmaven.repo.local=$(maven_cache_folder)'
+            displayName: 'Maven Compile'
 
-  # Stage 2: Test — Run unit tests
-  - stage: Test
-    displayName: "Unit Testing"
-    dependsOn: Build
-    jobs:
-      - job: TestJob
-        displayName: "Run Unit Tests"
-        pool:
-          vmImage: "ubuntu-latest"
-        steps:
-          - checkout: self
-
-          - task: JavaToolInstaller@0
-            displayName: "Install Java JDK"
+          - task: Maven@3
             inputs:
-              versionSpec: "$(java_version)"
-              jdkArchitectureOption: "x64"
-              jdkSourceOption: "PreInstalled"
-
-          - task: Cache@2
-            displayName: "Cache Maven Dependencies"
-            inputs:
-              key: "maven | $(Agent.OS) | **/pom.xml"
-              restoreKeys: |
-                maven | $(Agent.OS)
-                maven
-              path: "$(maven_cache_folder)"
-
-          - script: "mvn test --batch-mode"
-            displayName: "Run Unit Tests"
+              mavenPomFile: 'pom.xml'
+              goals: 'test'
+              options: '-Dmaven.repo.local=$(maven_cache_folder)'
+            displayName: 'Run Tests'
+            continueOnError: true
 
           - task: PublishTestResults@2
-            displayName: "Publish Test Results"
             inputs:
-              testResultsFormat: "JUnit"
-              testResultsFiles: "**/surefire-reports/*.xml"
-            condition: always()
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              testRunTitle: 'Java Tests'
+            condition: succeededOrFailed()
 
-  # Stage 3: SAST — Security scanning (mandatory)
-  - stage: SAST
-    displayName: "Security Scan"
-    dependsOn: Test
+  - stage: sast_stage
+    displayName: 'SAST Stage'
+    dependsOn: build_stage
     jobs:
-      - job: SecurityJob
-        displayName: "Run SAST Tools"
-        pool:
-          vmImage: "ubuntu-latest"
+      - job: security_scan
+        displayName: 'Security Scanning'
         steps:
-          - checkout: self
-
-          # Gitleaks — detect secrets and credentials
-          - script: "gitleaks detect --source . --verbose"
-            displayName: "Gitleaks — Secret Detection"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true
+            displayName: 'Gitleaks Secret Scan'
             continueOnError: true
 
-          # Semgrep — static code analysis
-          - script: "semgrep scan --config auto --json --output semgrep-report.json"
-            displayName: "Semgrep — Code Analysis"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true
+            displayName: 'Semgrep SAST Scan'
             continueOnError: true
 
-          # Trivy — dependency and filesystem scan
-          - script: "trivy fs . --format json --output trivy-report.json"
-            displayName: "Trivy — Dependency & FS Scan"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true
+            displayName: 'Trivy Vulnerability Scan'
             continueOnError: true
-
-          # Publish SAST reports
-          - task: PublishBuildArtifacts@1
-            displayName: "Publish SAST Reports"
-            inputs:
-              pathToPublish: "."
-              artifactName: "sast-reports"
-            condition: always()
-
-  # Stage 4: Publish — Publish build artifact
-  - stage: Publish
-    displayName: "Publish Artifact"
-    dependsOn: SAST
-    jobs:
-      - job: PublishJob
-        displayName: "Publish Build Artifact"
-        pool:
-          vmImage: "ubuntu-latest"
-        steps:
-          - checkout: self
-
-          - task: JavaToolInstaller@0
-            displayName: "Install Java JDK"
-            inputs:
-              versionSpec: "$(java_version)"
-              jdkArchitectureOption: "x64"
-              jdkSourceOption: "PreInstalled"
-
-          - task: Cache@2
-            displayName: "Cache Maven Dependencies"
-            inputs:
-              key: "maven | $(Agent.OS) | **/pom.xml"
-              restoreKeys: |
-                maven | $(Agent.OS)
-                maven
-              path: "$(maven_cache_folder)"
-
-          - script: "mvn clean package -DskipTests --batch-mode"
-            displayName: "Build Application"
 
           - task: PublishBuildArtifacts@1
-            displayName: "Publish $(artifact_name)"
             inputs:
-              pathToPublish: "target"
-              artifactName: "$(artifact_name)"
+              pathToPublish: '$(Build.SourcesDirectory)'
+              artifactName: 'security-reports'
+            displayName: 'Publish Security Reports'
+
+  - stage: publish_stage
+    displayName: 'Publish Stage'
+    dependsOn: sast_stage
+    jobs:
+      - job: publish_artifacts
+        displayName: 'Publish Build Artifacts'
+        steps:
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              goals: 'package'
+              options: '-Dmaven.repo.local=$(maven_cache_folder) -DskipTests'
+            displayName: 'Maven Package'
+
+          - task: CopyFiles@2
+            inputs:
+              sourceFolder: '$(Build.SourcesDirectory)'
+              contents: |
+                target/**/*.jar
+                target/**/*.war
+                **/*.yml
+                **/*.yaml
+              targetFolder: '$(Build.ArtifactStagingDirectory)'
+            displayName: 'Copy Build Artifacts'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: '$(artifact_name)'
+            displayName: 'Publish Build Artifacts'

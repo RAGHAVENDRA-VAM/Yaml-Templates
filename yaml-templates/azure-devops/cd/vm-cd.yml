@@ -1,111 +1,74 @@
 ---
-# yaml-templates/azure-devops/cd/vm-cd.yml
-# Purpose: Azure DevOps CD pipeline for deploying to Virtual Machine via SSH.
-# Stages: Download → Deploy
-# Target: VM with SSH copy, service restart, and health check
+# Azure DevOps CD Pipeline for VM Deployment
+# Single Deploy stage for Virtual Machine deployment
 
 trigger: none
 
-# CD triggers when CI pipeline completes successfully
-resources:
-  pipelines:
-    - pipeline: ci_pipeline
-      source: ci
-      trigger:
-        branches:
-          include:
-            - main
+pool:
+  vmImage: 'ubuntu-latest'
 
 variables:
-  project_name: "$(Build.Repository.Name)"
-  artifact_name: "$(project_name)-drop"
-  environment: "dev"
-  vm_ssh_connection: "$(VM_SSH_CONNECTION)"
+  azure_subscription: 'your-azure-subscription'
+  resource_group: 'your-resource-group'
+  vm_name: 'your-vm'
+  deployment_path: '/opt/app'
+  project_name: '$(Build.Repository.Name)'
+  artifact_name: '$(Build.Repository.Name)-drop'
 
 stages:
-  # Stage 1: Deploy to VM
-  - stage: Deploy_VM
-    displayName: "Deploy to Virtual Machine"
+  - stage: deploy_stage
+    displayName: 'Deploy Stage'
     jobs:
-      - deployment: DeployJob
-        displayName: "Deploy to VM"
-        pool:
-          vmImage: "ubuntu-latest"
-        environment: "$(environment)"
+      - deployment: deploy_to_vm
+        displayName: 'Deploy to VM'
+        environment: 'production'
         strategy:
           runOnce:
             deploy:
               steps:
-                # Download artifact from CI pipeline
                 - task: DownloadBuildArtifacts@0
-                  displayName: "Download $(artifact_name)"
                   inputs:
-                    buildType: "specific"
-                    project: "$(System.TeamProjectId)"
-                    pipeline: "$(resources.pipeline.ci_pipeline.pipelineID)"
-                    buildVersionToDownload: "latest"
-                    artifactName: "$(artifact_name)"
-                    downloadPath: "$(System.ArtifactsDirectory)"
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: '$(artifact_name)'
+                    downloadPath: '$(Pipeline.Workspace)'
+                  displayName: 'Download Build Artifacts'
 
-                # Copy artifact to VM
-                - task: CopyFilesOverSSH@0
-                  displayName: "Copy Artifact to VM"
+                - task: AzureCLI@2
                   inputs:
-                    sshEndpoint: "$(vm_ssh_connection)"
-                    sourceFolder: "$(System.ArtifactsDirectory)/$(artifact_name)"
-                    contents: "**"
-                    targetFolder: "/app/releases/$(Build.BuildId)"
-                    cleanTargetFolder: false
+                    azureSubscription: '$(azure_subscription)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az vm run-command invoke \
+                        --resource-group $(resource_group) \
+                        --name $(vm_name) \
+                        --command-id RunShellScript \
+                        --scripts "sudo mkdir -p $(deployment_path) && sudo chown $(whoami):$(whoami) $(deployment_path)"
+                  displayName: 'Prepare VM Directory'
 
-                # Deploy on VM — extract and restart service
-                - task: SSH@0
-                  displayName: "Deploy Application on VM"
+                - task: AzureFileCopy@4
                   inputs:
-                    sshEndpoint: "$(vm_ssh_connection)"
-                    runOptions: "inline"
-                    inline: |
-                      # Create backup of current version
-                      sudo cp -r /app/current /app/backup/$(date +%Y%m%d_%H%M%S) || true
-                      
-                      # Deploy new version
-                      cd /app/releases/$(Build.BuildId)
-                      sudo cp -r * /app/current/
-                      
-                      # Set permissions
-                      sudo chown -R appuser:appuser /app/current
-                      sudo chmod +x /app/current/start.sh || true
-                      
-                      # Restart service
-                      sudo systemctl restart $(project_name)
+                    SourcePath: '$(Pipeline.Workspace)/$(artifact_name)/*'
+                    azureSubscription: '$(azure_subscription)'
+                    Destination: 'AzureVMs'
+                    storage: 'your-storage-account'
+                    resourceGroup: '$(resource_group)'
+                    vmsAdminUserName: 'azureuser'
+                    vmsAdminPassword: '$(vm_admin_password)'
+                    targetPath: '$(deployment_path)'
+                    machineNames: '$(vm_name)'
+                  displayName: 'Copy Files to VM'
 
-                # Verify service health
-                - task: SSH@0
-                  displayName: "Verify Service Health"
+                - task: AzureCLI@2
                   inputs:
-                    sshEndpoint: "$(vm_ssh_connection)"
-                    runOptions: "inline"
-                    inline: |
-                      # Wait for service to start
-                      sleep 10
-                      
-                      # Check service status
-                      if systemctl is-active --quiet $(project_name); then
-                        echo "✅ Service $(project_name) is running"
-                        systemctl status $(project_name) --no-pager
-                      else
-                        echo "❌ Service $(project_name) failed to start"
-                        systemctl status $(project_name) --no-pager
-                        exit 1
-                      fi
-
-                # Health check via HTTP (if applicable)
-                - task: SSH@0
-                  displayName: "HTTP Health Check"
-                  inputs:
-                    sshEndpoint: "$(vm_ssh_connection)"
-                    runOptions: "inline"
-                    inline: >
-                      curl --fail --silent --max-time 30 http://localhost:8080/health
-                      && echo "✅ HTTP health check passed"
-                      || echo "⚠️ HTTP health check failed"
-                  continueOnError: true
+                    azureSubscription: '$(azure_subscription)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az vm run-command invoke \
+                        --resource-group $(resource_group) \
+                        --name $(vm_name) \
+                        --command-id RunShellScript \
+                        --scripts "cd $(deployment_path) && chmod +x deploy.sh && ./deploy.sh"
+                  displayName: 'Execute Deployment Script'

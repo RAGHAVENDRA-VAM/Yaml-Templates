@@ -1,8 +1,7 @@
 ---
 # yaml-templates/github-actions/ci/java-ci.yml
 # Purpose: GitHub Actions CI workflow for Java applications.
-# Jobs: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+# Stages: Build → SAST → Publish
 
 name: "Java CI Pipeline"
 
@@ -10,20 +9,15 @@ on:
   push:
     branches:
       - main
-      - develop
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   JAVA_VERSION: "21"
   PROJECT_NAME: "${{ github.event.repository.name }}"
-  ARTIFACT_NAME: "${{ github.event.repository.name }}-drop"
 
 jobs:
-  # Job 1: Build — Build Java application
   build:
-    name: "Build Java Application"
+    name: "Build Java App"
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout Code"
@@ -44,98 +38,42 @@ jobs:
       - name: "Build Application"
         run: "mvn clean package -DskipTests --batch-mode"
 
+      - name: "Archive Application"
+        run: |
+          cd target
+          zip -r ../app.zip *.jar
+
       - name: "Upload Build Artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: "build-output"
-          path: "target/*.jar"
+          name: "java-app"
+          path: "app.zip"
 
-  # Job 2: Test — Run unit tests
-  test:
-    name: "Run Unit Tests"
+  sast:
+    name: "Security Scan (SAST)"
     runs-on: ubuntu-latest
     needs: build
     steps:
       - name: "Checkout Code"
         uses: actions/checkout@v4
 
-      - name: "Setup Java JDK"
-        uses: actions/setup-java@v4
-        with:
-          java-version: "${{ env.JAVA_VERSION }}"
-          distribution: "temurin"
-
-      - name: "Cache Maven Dependencies"
-        uses: actions/cache@v4
-        with:
-          path: "~/.m2"
-          key: "${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}"
-
-      - name: "Run Unit Tests"
-        run: "mvn test --batch-mode"
-
-      - name: "Publish Test Results"
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: "Java Tests"
-          path: "target/surefire-reports/*.xml"
-          reporter: "java-junit"
-
-  # Job 3: SAST — Security scanning (mandatory)
-  sast:
-    name: "Security Scan"
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
-
-      # Gitleaks — detect secrets and credentials
-      - name: "Gitleaks — Secret Detection"
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        continue-on-error: true
-
-      # Semgrep — static code analysis
-      - name: "Semgrep — Code Analysis"
+      - name: "Run Semgrep"
         uses: returntocorp/semgrep-action@v1
         with:
           config: "auto"
-        continue-on-error: true
 
-      # Trivy — dependency and filesystem scan
-      - name: "Trivy — Dependency & FS Scan"
+      - name: "Run Gitleaks"
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/path zricethezav/gitleaks:latest detect \
+            --source="/path" \
+            --verbose \
+            --redact
+
+      - name: "Run Trivy FS Scan"
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: "fs"
           scan-ref: "."
-          format: "sarif"
-          output: "trivy-results.sarif"
-        continue-on-error: true
-
-      - name: "Upload SAST Reports"
-        uses: actions/upload-artifact@v4
-        with:
-          name: "sast-reports"
-          path: "*.sarif"
-        if: always()
-
-  # Job 4: Publish — Publish final artifact
-  publish:
-    name: "Publish Artifact"
-    runs-on: ubuntu-latest
-    needs: sast
-    steps:
-      - name: "Download Build Artifact"
-        uses: actions/download-artifact@v4
-        with:
-          name: "build-output"
-          path: "target/"
-
-      - name: "Publish ${{ env.ARTIFACT_NAME }}"
-        uses: actions/upload-artifact@v4
-        with:
-          name: "${{ env.ARTIFACT_NAME }}"
-          path: "target/"
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"

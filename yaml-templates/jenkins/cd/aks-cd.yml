@@ -1,114 +1,53 @@
 ---
-# yaml-templates/jenkins/cd/aks-cd.yml
-# Purpose: Jenkins CD pipeline for deploying to Azure Kubernetes Service.
-# Stages: Deploy
-# Target: AKS with kubectl and rollout verification
+// Jenkins CD Pipeline for AKS Deployment
+// Single Deploy stage for Kubernetes deployment
 
 pipeline {
-  agent any
-
-  environment {
-    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
-    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
-    ENVIRONMENT = 'dev'
-    AZURE_CLIENT_ID = credentials('AZURE_CLIENT_ID')
-    AZURE_CLIENT_SECRET = credentials('AZURE_CLIENT_SECRET')
-    AZURE_TENANT_ID = credentials('AZURE_TENANT_ID')
-    RESOURCE_GROUP = credentials('RESOURCE_GROUP')
-    AKS_CLUSTER_NAME = credentials('AKS_CLUSTER_NAME')
-    AKS_NAMESPACE = credentials('AKS_NAMESPACE')
-  }
-
-  triggers {
-    upstream(upstreamProjects: 'ci-pipeline', threshold: hudson.model.Result.SUCCESS)
-  }
-
-  stages {
-    // Deploy stage — deploy to AKS
-    stage('Deploy to AKS') {
-      steps {
-        echo "Deploying to Azure Kubernetes Service: ${env.PROJECT_NAME}"
-        
-        // Copy artifacts from upstream CI job
-        copyArtifacts(
-          projectName: 'ci-pipeline',
-          selector: lastSuccessful(),
-          target: 'artifacts/'
-        )
-
-        // Install Azure CLI and kubectl (if not available)
-        sh '''
-          if ! command -v az &> /dev/null; then
-            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-          fi
-          if ! command -v kubectl &> /dev/null; then
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl && sudo mv kubectl /usr/local/bin/
-          fi
-        '''
-
-        // Azure login and set AKS context
-        sh '''
-          az login --service-principal \
-            -u ${AZURE_CLIENT_ID} \
-            -p ${AZURE_CLIENT_SECRET} \
-            --tenant ${AZURE_TENANT_ID}
-          
-          az aks get-credentials \
-            --resource-group ${RESOURCE_GROUP} \
-            --name ${AKS_CLUSTER_NAME} \
-            --overwrite-existing
-        '''
-
-        // Update image tag and deploy
-        sh '''
-          sed -i "s|IMAGE_TAG|${BUILD_ID}|g" artifacts/manifests/deployment.yaml
-          kubectl apply -f artifacts/manifests/
-        '''
-
-        // Verify rollout status
-        sh '''
-          kubectl rollout status deployment/${PROJECT_NAME} \
-            --namespace ${AKS_NAMESPACE} --timeout=300s
-        '''
-
-        // Get pod status and verify deployment
-        script {
-          try {
-            sh '''
-              kubectl get pods --namespace ${AKS_NAMESPACE} -l app=${PROJECT_NAME}
-              
-              # Verify deployment health
-              READY_REPLICAS=$(kubectl get deployment ${PROJECT_NAME} \
-                --namespace ${AKS_NAMESPACE} \
-                -o jsonpath='{.status.readyReplicas}')
-              
-              if [ "$READY_REPLICAS" -ge "1" ]; then
-                echo "✅ Deployment successful"
-              else
-                echo "❌ Deployment failed"
-                kubectl describe deployment ${PROJECT_NAME} --namespace ${AKS_NAMESPACE}
-                exit 1
-              fi
-            '''
-          } catch (Exception e) {
-            echo "❌ Deployment verification failed: ${e.getMessage()}"
-            throw e
-          }
+    agent any
+    
+    environment {
+        AZURE_SUBSCRIPTION = 'your-azure-subscription'
+        RESOURCE_GROUP = 'your-resource-group'
+        AKS_CLUSTER = 'your-aks-cluster'
+        CONTAINER_REGISTRY = 'your-acr.azurecr.io'
+        IMAGE_NAME = 'your-app'
+        NAMESPACE = 'default'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    stages {
+        stage('Deploy Stage') {
+            steps {
+                script {
+                    // Download artifacts from CI build
+                    copyArtifacts(
+                        projectName: "${PROJECT_NAME}-ci",
+                        selector: lastSuccessful(),
+                        target: 'artifacts/'
+                    )
+                    
+                    // Deploy to AKS
+                    withCredentials([azureServicePrincipal('azure-service-principal')]) {
+                        sh '''
+                            az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                            az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER
+                            
+                            docker build -t $CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER artifacts/
+                            docker push $CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER
+                            
+                            kubectl set image deployment/$IMAGE_NAME $IMAGE_NAME=$CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER -n $NAMESPACE
+                            kubectl rollout status deployment/$IMAGE_NAME -n $NAMESPACE
+                        '''
+                    }
+                }
+            }
         }
-      }
     }
-  }
-
-  post {
-    always {
-      cleanWs()
+    
+    post {
+        always {
+            cleanWs()
+        }
     }
-    success {
-      echo "✅ CD pipeline completed successfully"
-    }
-    failure {
-      echo "❌ CD pipeline failed"
-    }
-  }
 }

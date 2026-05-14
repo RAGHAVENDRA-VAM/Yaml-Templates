@@ -1,56 +1,34 @@
 ---
-# yaml-templates/gitlab-ci/cd/aks-cd.yml
-# Purpose: GitLab CI CD pipeline for deploying to Azure Kubernetes Service.
-# Stages: Deploy
-# Target: AKS with kubectl and rollout verification
-
-variables:
-  PROJECT_NAME: "$CI_PROJECT_NAME"
-  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
-  ENVIRONMENT: "dev"
+# GitLab CI CD Pipeline for AKS Deployment
+# Single Deploy stage for Kubernetes deployment
 
 stages:
   - deploy
 
-# Deploy stage — deploy to AKS
-deploy_aks:
+variables:
+  AZURE_SUBSCRIPTION: "your-azure-subscription"
+  RESOURCE_GROUP: "your-resource-group"
+  AKS_CLUSTER: "your-aks-cluster"
+  CONTAINER_REGISTRY: "your-acr.azurecr.io"
+  IMAGE_NAME: "your-app"
+  NAMESPACE: "default"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+deploy_stage:
   stage: deploy
   image: mcr.microsoft.com/azure-cli:latest
+  services:
+    - docker:dind
   environment:
-    name: "$ENVIRONMENT"
-  dependencies:
-    - publish_job  # from upstream CI pipeline
-  before_script:
-    # Install kubectl
-    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    - chmod +x kubectl && mv kubectl /usr/local/bin/
+    name: production
   script:
-    # Azure login
     - az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
-    
-    # Set AKS context
-    - az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER_NAME --overwrite-existing
-    
-    # Update image tag in deployment manifest
-    - sed -i "s|IMAGE_TAG|$CI_PIPELINE_ID|g" dist/manifests/deployment.yaml
-    
-    # Deploy to AKS
-    - kubectl apply -f dist/manifests/
-    
-    # Verify rollout status
-    - kubectl rollout status deployment/$PROJECT_NAME --namespace $AKS_NAMESPACE --timeout=300s
-    
-    # Get pod status
-    - kubectl get pods --namespace $AKS_NAMESPACE -l app=$PROJECT_NAME
-    
-    # Verify deployment health
-    - |
-      if kubectl get deployment $PROJECT_NAME --namespace $AKS_NAMESPACE -o jsonpath='{.status.readyReplicas}' | grep -q "1"; then
-        echo "✅ Deployment successful"
-      else
-        echo "❌ Deployment failed"
-        kubectl describe deployment $PROJECT_NAME --namespace $AKS_NAMESPACE
-        exit 1
-      fi
+    - az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER
+    - docker build -t $CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA .
+    - docker push $CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA
+    - kubectl set image deployment/$IMAGE_NAME $IMAGE_NAME=$CONTAINER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA -n $NAMESPACE
+    - kubectl rollout status deployment/$IMAGE_NAME -n $NAMESPACE
   only:
     - main
+  when: manual

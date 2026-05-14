@@ -1,91 +1,64 @@
 ---
-# yaml-templates/gitlab-ci/ci/dotnet-ci.yml
-# Purpose: GitLab CI pipeline for .NET applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
-
-variables:
-  DOTNET_VERSION: "8.0"
-  BUILD_CONFIGURATION: "Release"
-  PROJECT_NAME: "$CI_PROJECT_NAME"
-  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+# GitLab CI Pipeline for .NET Applications
+# Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 stages:
   - build
-  - test
   - sast
   - publish
 
-# Stage 1: Build — Compile .NET application
-build_dotnet:
+variables:
+  DOTNET_VERSION: "8.0"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+build_stage:
   stage: build
   image: mcr.microsoft.com/dotnet/sdk:8.0
   script:
     - dotnet restore
-    - dotnet build --configuration $BUILD_CONFIGURATION --no-restore
-    - dotnet publish --configuration $BUILD_CONFIGURATION --no-build --output dist/
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 hour
-
-# Stage 2: Test — Run unit tests
-test_dotnet:
-  stage: test
-  image: mcr.microsoft.com/dotnet/sdk:8.0
-  dependencies:
-    - build_dotnet
-  script:
-    - dotnet restore
-    - dotnet test --configuration $BUILD_CONFIGURATION --logger trx --results-directory test-results/
+    - dotnet build --configuration Release --no-restore
+    - dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
   artifacts:
     reports:
-      junit: "test-results/*.trx"
-    expire_in: 1 week
-
-# Stage 3: SAST — Security scanning (mandatory)
-sast_gitleaks:
-  stage: sast
-  image: zricethezav/gitleaks:latest
-  script:
-    - gitleaks detect --source . --verbose
-  allow_failure: true
-
-sast_semgrep:
-  stage: sast
-  image: returntocorp/semgrep:latest
-  script:
-    - semgrep scan --config auto --json --output semgrep-report.json
-  artifacts:
+      junit: coverage/**/coverage.cobertura.xml
     paths:
+      - bin/
+      - obj/
+      - coverage/
+    expire_in: 1 hour
+  allow_failure: false
+
+sast_stage:
+  stage: sast
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true
+  artifacts:
+    reports:
+      sast: semgrep-report.json
+    paths:
+      - gitleaks-report.json
       - semgrep-report.json
-    expire_in: 1 week
-  allow_failure: true
-
-sast_trivy:
-  stage: sast
-  image: aquasec/trivy:latest
-  script:
-    - trivy fs . --format json --output trivy-report.json
-  artifacts:
-    paths:
       - trivy-report.json
     expire_in: 1 week
   allow_failure: true
 
-# Stage 4: Publish — Publish final artifact
-publish_dotnet:
+publish_stage:
   stage: publish
   image: mcr.microsoft.com/dotnet/sdk:8.0
-  dependencies:
-    - build_dotnet
   script:
-    - echo "Publishing $ARTIFACT_NAME"
+    - dotnet publish --configuration Release --output ./publish --no-restore
   artifacts:
     name: "$ARTIFACT_NAME"
     paths:
-      - dist/
+      - publish/
+      - "*.yml"
+      - "*.yaml"
     expire_in: 1 week
-  only:
-    - main
-    - develop
+  dependencies:
+    - build_stage

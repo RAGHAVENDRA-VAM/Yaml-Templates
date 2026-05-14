@@ -1,8 +1,7 @@
 ---
 # yaml-templates/github-actions/cd/container-cd.yml
 # Purpose: GitHub Actions CD workflow for deploying as Docker container.
-# Jobs: Download → Deploy
-# Target: Docker container with build, push, and run
+# Stages: Deploy
 
 name: "Container CD Pipeline"
 
@@ -16,34 +15,27 @@ on:
 
 env:
   PROJECT_NAME: "${{ github.event.repository.name }}"
-  ARTIFACT_NAME: "${{ github.event.repository.name }}-drop"
-  ENVIRONMENT: "dev"
 
 jobs:
-  # Deploy job — deploy as container
   deploy:
     name: "Deploy as Docker Container"
     runs-on: ubuntu-latest
-    environment: "${{ env.ENVIRONMENT }}"
+    environment: "production"
     if: "${{ github.event.workflow_run.conclusion == 'success' }}"
     steps:
       - name: "Checkout Code"
         uses: actions/checkout@v4
 
-      # Download artifact from CI workflow
-      - name: "Download ${{ env.ARTIFACT_NAME }}"
+      - name: "Download Build Artifact"
         uses: actions/download-artifact@v4
         with:
-          name: "${{ env.ARTIFACT_NAME }}"
-          path: "artifacts/"
+          name: "app"
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           run-id: "${{ github.event.workflow_run.id }}"
 
-      # Set up Docker Buildx
       - name: "Set up Docker Buildx"
         uses: docker/setup-buildx-action@v3
 
-      # Login to container registry
       - name: "Login to Container Registry"
         uses: docker/login-action@v3
         with:
@@ -51,53 +43,11 @@ jobs:
           username: "${{ secrets.REGISTRY_USERNAME }}"
           password: "${{ secrets.REGISTRY_PASSWORD }}"
 
-      # Build and push Docker image
       - name: "Build and Push Docker Image"
         uses: docker/build-push-action@v5
         with:
-          context: "artifacts/"
+          context: "."
           push: true
           tags: |
             ${{ secrets.CONTAINER_REGISTRY }}/${{ env.PROJECT_NAME }}:${{ github.run_id }}
             ${{ secrets.CONTAINER_REGISTRY }}/${{ env.PROJECT_NAME }}:latest
-
-      # Stop and remove existing container
-      - name: "Stop Existing Container"
-        run: |
-          docker stop ${{ env.PROJECT_NAME }} || true
-          docker rm ${{ env.PROJECT_NAME }} || true
-        continue-on-error: true
-
-      # Pull and run new container
-      - name: "Deploy New Container"
-        run: |
-          docker pull ${{ secrets.CONTAINER_REGISTRY }}/${{ env.PROJECT_NAME }}:${{ github.run_id }}
-          docker run -d \
-            --name ${{ env.PROJECT_NAME }} \
-            --restart unless-stopped \
-            -p 80:8080 \
-            -e ENVIRONMENT=${{ env.ENVIRONMENT }} \
-            ${{ secrets.CONTAINER_REGISTRY }}/${{ env.PROJECT_NAME }}:${{ github.run_id }}
-
-      # Verify container is running
-      - name: "Verify Container Status"
-        run: |
-          sleep 10
-          if docker ps | grep -q ${{ env.PROJECT_NAME }}; then
-            echo "✅ Container ${{ env.PROJECT_NAME }} is running"
-            docker ps | grep ${{ env.PROJECT_NAME }}
-            docker logs ${{ env.PROJECT_NAME }} --tail 20
-          else
-            echo "❌ Container ${{ env.PROJECT_NAME }} failed to start"
-            docker logs ${{ env.PROJECT_NAME }} || true
-            exit 1
-          fi
-
-      # Container health check
-      - name: "Container Health Check"
-        run: >
-          sleep 30 &&
-          curl --fail --silent --max-time 30 http://localhost/health
-          && echo "✅ Container health check passed"
-          || echo "⚠️ Container health check failed"
-        continue-on-error: true

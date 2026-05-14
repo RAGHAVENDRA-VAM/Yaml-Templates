@@ -1,90 +1,71 @@
 ---
-# yaml-templates/gitlab-ci/ci/python-ci.yml
-# Purpose: GitLab CI pipeline for Python applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
-
-variables:
-  PYTHON_VERSION: "3.12"
-  PROJECT_NAME: "$CI_PROJECT_NAME"
-  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+# GitLab CI Pipeline for Python Applications
+# Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 stages:
   - build
-  - test
   - sast
   - publish
 
-# Stage 1: Build — Build Python application
-build_python:
-  stage: build
-  image: python:3.12-slim
-  script:
-    - pip install -r requirements.txt
-    - pip install build
-    - python -m build --outdir dist/
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 hour
+variables:
+  PYTHON_VERSION: "3.11"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
 
-# Stage 2: Test — Run unit tests
-test_python:
-  stage: test
-  image: python:3.12-slim
-  dependencies:
-    - build_python
+build_stage:
+  stage: build
+  image: python:3.11
+  cache:
+    paths:
+      - .cache/pip/
   script:
+    - python -m pip install --upgrade pip
     - pip install -r requirements.txt
-    - pytest --tb=short --junitxml=test-results.xml
+    - python -m pytest tests/ --junitxml=test-results.xml --cov=. --cov-report=xml
   artifacts:
     reports:
-      junit: "test-results.xml"
-    expire_in: 1 week
-
-# Stage 3: SAST — Security scanning (mandatory)
-sast_gitleaks:
-  stage: sast
-  image: zricethezav/gitleaks:latest
-  script:
-    - gitleaks detect --source . --verbose
-  allow_failure: true
-
-sast_semgrep:
-  stage: sast
-  image: returntocorp/semgrep:latest
-  script:
-    - semgrep scan --config auto --json --output semgrep-report.json
-  artifacts:
+      junit: test-results.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
     paths:
+      - "*.py"
+      - requirements.txt
+      - coverage.xml
+    expire_in: 1 hour
+  allow_failure: false
+
+sast_stage:
+  stage: sast
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true
+    - docker run --rm -v $CI_PROJECT_DIR:/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true
+  artifacts:
+    reports:
+      sast: semgrep-report.json
+    paths:
+      - gitleaks-report.json
       - semgrep-report.json
-    expire_in: 1 week
-  allow_failure: true
-
-sast_trivy:
-  stage: sast
-  image: aquasec/trivy:latest
-  script:
-    - trivy fs . --format json --output trivy-report.json
-  artifacts:
-    paths:
       - trivy-report.json
     expire_in: 1 week
   allow_failure: true
 
-# Stage 4: Publish — Publish final artifact
-publish_python:
+publish_stage:
   stage: publish
-  image: python:3.12-slim
-  dependencies:
-    - build_python
+  image: python:3.11
   script:
-    - echo "Publishing $ARTIFACT_NAME"
+    - echo "Publishing Python application artifacts"
   artifacts:
     name: "$ARTIFACT_NAME"
     paths:
-      - dist/
+      - "*.py"
+      - requirements.txt
+      - "*.yml"
+      - "*.yaml"
     expire_in: 1 week
-  only:
-    - main
-    - develop
+  dependencies:
+    - build_stage

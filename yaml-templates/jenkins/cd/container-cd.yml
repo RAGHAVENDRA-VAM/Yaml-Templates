@@ -1,127 +1,53 @@
 ---
-# yaml-templates/jenkins/cd/container-cd.yml
-# Purpose: Jenkins CD pipeline for deploying as Docker container.
-# Stages: Deploy
-# Target: Docker container with build, push, and run
+// Jenkins CD Pipeline for Container Deployment
+// Single Deploy stage for Azure Container Apps deployment
 
 pipeline {
-  agent any
-
-  environment {
-    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
-    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
-    ENVIRONMENT = 'dev'
-    CONTAINER_REGISTRY = credentials('CONTAINER_REGISTRY')
-    REGISTRY_USERNAME = credentials('REGISTRY_USERNAME')
-    REGISTRY_PASSWORD = credentials('REGISTRY_PASSWORD')
-  }
-
-  triggers {
-    upstream(upstreamProjects: 'ci-pipeline', threshold: hudson.model.Result.SUCCESS)
-  }
-
-  stages {
-    // Deploy stage — deploy as container
-    stage('Deploy Container') {
-      steps {
-        echo "Deploying as Docker Container: ${env.PROJECT_NAME}"
-        
-        // Copy artifacts from upstream CI job
-        copyArtifacts(
-          projectName: 'ci-pipeline',
-          selector: lastSuccessful(),
-          target: 'artifacts/'
-        )
-
-        // Login to container registry
-        sh '''
-          echo ${REGISTRY_PASSWORD} | docker login ${CONTAINER_REGISTRY} \
-            -u ${REGISTRY_USERNAME} --password-stdin
-        '''
-
-        // Build Docker image
-        sh '''
-          docker build \
-            -t ${CONTAINER_REGISTRY}/${PROJECT_NAME}:${BUILD_ID} \
-            -t ${CONTAINER_REGISTRY}/${PROJECT_NAME}:latest \
-            artifacts/
-        '''
-
-        // Push Docker image to registry
-        sh '''
-          docker push ${CONTAINER_REGISTRY}/${PROJECT_NAME}:${BUILD_ID}
-          docker push ${CONTAINER_REGISTRY}/${PROJECT_NAME}:latest
-        '''
-
-        // Stop and remove existing container
-        script {
-          try {
-            sh '''
-              docker stop ${PROJECT_NAME} || true
-              docker rm ${PROJECT_NAME} || true
-            '''
-          } catch (Exception e) {
-            echo "No existing container to stop: ${e.getMessage()}"
-          }
+    agent any
+    
+    environment {
+        AZURE_SUBSCRIPTION = 'your-azure-subscription'
+        RESOURCE_GROUP = 'your-resource-group'
+        CONTAINER_APP = 'your-container-app'
+        CONTAINER_REGISTRY = 'your-acr.azurecr.io'
+        IMAGE_NAME = 'your-app'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    stages {
+        stage('Deploy Stage') {
+            steps {
+                script {
+                    // Download artifacts from CI build
+                    copyArtifacts(
+                        projectName: "${PROJECT_NAME}-ci",
+                        selector: lastSuccessful(),
+                        target: 'artifacts/'
+                    )
+                    
+                    // Deploy to Container Apps
+                    withCredentials([azureServicePrincipal('azure-service-principal')]) {
+                        sh '''
+                            az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                            
+                            docker build -t $CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER artifacts/
+                            docker push $CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER
+                            
+                            az containerapp update \
+                                --name $CONTAINER_APP \
+                                --resource-group $RESOURCE_GROUP \
+                                --image $CONTAINER_REGISTRY/$IMAGE_NAME:$BUILD_NUMBER
+                        '''
+                    }
+                }
+            }
         }
-
-        // Pull and run new container
-        sh '''
-          docker pull ${CONTAINER_REGISTRY}/${PROJECT_NAME}:${BUILD_ID}
-          docker run -d \
-            --name ${PROJECT_NAME} \
-            --restart unless-stopped \
-            -p 80:8080 \
-            -e ENVIRONMENT=${ENVIRONMENT} \
-            ${CONTAINER_REGISTRY}/${PROJECT_NAME}:${BUILD_ID}
-        '''
-
-        // Verify container is running
-        script {
-          sleep(10)
-          try {
-            sh '''
-              if docker ps | grep -q ${PROJECT_NAME}; then
-                echo "✅ Container ${PROJECT_NAME} is running"
-                docker ps | grep ${PROJECT_NAME}
-                docker logs ${PROJECT_NAME} --tail 20
-              else
-                echo "❌ Container ${PROJECT_NAME} failed to start"
-                docker logs ${PROJECT_NAME} || true
-                exit 1
-              fi
-            '''
-          } catch (Exception e) {
-            echo "❌ Container verification failed: ${e.getMessage()}"
-            throw e
-          }
+    }
+    
+    post {
+        always {
+            cleanWs()
         }
-
-        // Container health check
-        script {
-          sleep(30)
-          try {
-            sh '''
-              curl --fail --silent --max-time 30 http://localhost/health
-              echo "✅ Container health check passed"
-            '''
-          } catch (Exception e) {
-            echo "⚠️ Container health check failed: ${e.getMessage()}"
-          }
-        }
-      }
     }
-  }
-
-  post {
-    always {
-      cleanWs()
-    }
-    success {
-      echo "✅ CD pipeline completed successfully"
-    }
-    failure {
-      echo "❌ CD pipeline failed"
-    }
-  }
 }

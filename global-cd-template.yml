@@ -2,7 +2,6 @@
 # global-cd-template.yml
 # Purpose: Universal CD template structure for all CI/CD tools and deploy targets.
 # This file defines the mandatory structure that ALL CD pipelines must follow.
-# AI agents must use this as the base template for generating tool-specific CD files.
 
 # YAML Coding Standards (MANDATORY)
 yaml_standards:
@@ -13,162 +12,56 @@ yaml_standards:
   line_length: 120
   comments: "required for all major sections"
 
-# Universal CD Pipeline Structure (NEVER CHANGE THIS ORDER)
+# Universal CD Pipeline Structure (SIMPLE)
 cd_pipeline_structure:
   
-  # Stage 1: Download (MANDATORY)
-  stage_download:
-    name: "Download"
-    purpose: "Download artifact from CI pipeline, verify integrity"
-    steps:
-      - "download_ci_artifact"
-      - "verify_artifact_integrity"
-      - "extract_artifact_contents"
-    
-  # Stage 2: Deploy (MANDATORY)
+  # Single Stage: Deploy (MANDATORY)
   stage_deploy:
     name: "Deploy"
-    purpose: "Deploy to target environment, verify deployment"
+    purpose: "Download artifact from CI and deploy to target environment"
     steps:
-      - "prepare_deployment_environment"
+      - "download_ci_artifact"
       - "execute_deployment"
-      - "run_smoke_tests"
-      - "verify_deployment_health"
-      - "run_post_deployment_checks"
 
 # Deploy Target Requirements
 deploy_targets:
   
   webapp:
     name: "Azure Web App"
-    requirements: ["azure-cli", "zip"]
+    requirements: ["azure-cli"]
     deployment_steps:
-      - "azure_login"
-      - "create_deployment_package"
+      - "download_artifact"
       - "deploy_to_webapp"
-      - "smoke_test_health_endpoint"
-      - "verify_app_response"
-    health_check: "https://{app_name}.azurewebsites.net/health"
     
   aks:
     name: "Azure Kubernetes Service"
     requirements: ["kubectl", "azure-cli"]
     deployment_steps:
+      - "download_artifact"
       - "set_aks_context"
-      - "update_image_tags"
-      - "apply_kubernetes_manifests"
-      - "verify_rollout_status"
-      - "check_pod_health"
-    health_check: "kubectl get pods -l app={app_name}"
+      - "deploy_to_aks"
     
   vm:
     name: "Virtual Machine"
     requirements: ["ssh", "scp"]
     deployment_steps:
-      - "copy_artifact_to_vm"
-      - "backup_current_version"
-      - "deploy_new_version"
-      - "restart_application_service"
-      - "verify_service_health"
-    health_check: "systemctl is-active {service_name}"
+      - "download_artifact"
+      - "copy_to_vm"
+      - "restart_service"
     
   container:
     name: "Docker Container"
     requirements: ["docker"]
     deployment_steps:
+      - "download_artifact"
       - "build_docker_image"
       - "push_to_registry"
-      - "stop_existing_container"
-      - "run_new_container"
-      - "verify_container_health"
-    health_check: "docker ps | grep {container_name}"
-
-# Tool-Specific Syntax Patterns
-tool_syntax:
-  
-  azure_devops:
-    trigger_syntax: |
-      trigger: none
-      resources:
-        pipelines:
-          - pipeline: ci_pipeline
-            source: ci
-            trigger:
-              branches:
-                include:
-                  - main
-    deployment_syntax: |
-      - deployment: DeployJob
-        displayName: "Deploy to {target}"
-        environment: "{environment}"
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - {steps}
-    
-  github_actions:
-    trigger_syntax: |
-      on:
-        workflow_run:
-          workflows: ["{ci_workflow_name}"]
-          types:
-            - completed
-          branches:
-            - main
-    job_syntax: |
-      deploy:
-        name: "Deploy to {target}"
-        runs-on: ubuntu-latest
-        environment: "{environment}"
-        if: "${{ github.event.workflow_run.conclusion == 'success' }}"
-        steps:
-          - {steps}
-    
-  gitlab_ci:
-    trigger_syntax: |
-      stages:
-        - deploy
-      
-      only:
-        - main
-    job_syntax: |
-      deploy_{target}:
-        stage: deploy
-        environment:
-          name: "{environment}"
-        dependencies:
-          - publish_job
-        script:
-          - {commands}
-    
-  jenkins:
-    trigger_syntax: |
-      triggers {
-        upstream(upstreamProjects: 'ci-pipeline', threshold: hudson.model.Result.SUCCESS)
-      }
-    stage_syntax: |
-      stage('Deploy to {target}') {
-        steps {
-          {steps}
-        }
-      }
 
 # Universal Variables (ALL TOOLS MUST USE)
 universal_variables:
   project_name: "auto-detect from repository"
   artifact_name: "{project_name}-drop"
-  environment: "dev"
-  deploy_target: "webapp|aks|vm|container"
-
-# Environment-Specific Variables
-environment_variables:
-  azure_subscription: "$(AZURE_SUBSCRIPTION)"
-  resource_group: "$(RESOURCE_GROUP)"
-  container_registry: "$(CONTAINER_REGISTRY)"
-  vm_ssh_connection: "$(VM_SSH_CONNECTION)"
-  aks_cluster_name: "$(AKS_CLUSTER_NAME)"
-  aks_namespace: "$(AKS_NAMESPACE)"
+  environment: "production"
 
 # Mandatory Rules for AI Generation
 ai_generation_rules:
@@ -176,31 +69,10 @@ ai_generation_rules:
   - "Always include file header comment with purpose and target"
   - "Use 2-space indentation, never tabs"
   - "Follow snake_case for all variable names"
-  - "Quote strings containing special characters"
-  - "CD must have exactly 2 stages: Download → Deploy"
+  - "CD must have exactly 1 stage: Deploy"
   - "CD must never contain build, test, or SAST stages"
   - "Always download artifact from CI pipeline first"
-  - "Include proper smoke tests for web deployments"
-  - "Include health checks for all deployment types"
-  - "Add rollout verification for Kubernetes deployments"
-  - "Include service restart verification for VM deployments"
-  - "Add container status checks for Docker deployments"
-  - "Use continueOnError: true for non-critical health checks"
-  - "Include proper error handling and rollback procedures"
-  - "Set environment-specific variables and secrets"
   - "Use tool-specific syntax for each CI/CD platform"
-  - "Include comments explaining each deployment step"
   - "Generate tool-native YAML syntax"
-
-# Deployment Best Practices
-deployment_best_practices:
-  - "Always backup current version before deployment"
-  - "Use blue-green or rolling deployment strategies"
-  - "Include comprehensive health checks"
-  - "Implement proper rollback mechanisms"
-  - "Use environment-specific configurations"
-  - "Include monitoring and alerting setup"
-  - "Verify deployment before marking as successful"
-  - "Use proper secret management"
-  - "Include post-deployment verification steps"
-  - "Document deployment procedures"
+  - "Keep pipelines simple and clean"
+  - "No complex health checks or testing in CD"

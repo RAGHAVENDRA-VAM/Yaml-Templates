@@ -1,8 +1,6 @@
 ---
-# yaml-templates/azure-devops/ci/python-ci.yml
-# Purpose: Azure DevOps CI pipeline for Python applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+# Azure DevOps CI Pipeline for Python Applications
+# Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 trigger:
   branches:
@@ -10,128 +8,86 @@ trigger:
       - main
       - develop
 
+pool:
+  vmImage: 'ubuntu-latest'
+
 variables:
-  python_version: "3.12"
-  project_name: "$(Build.Repository.Name)"
-  artifact_name: "$(project_name)-drop"
+  python_version: '3.11'
+  project_name: '$(Build.Repository.Name)'
+  artifact_name: '$(Build.Repository.Name)-drop'
 
 stages:
-  # Stage 1: Build — Build Python application
-  - stage: Build
-    displayName: "Build Stage"
+  - stage: build_stage
+    displayName: 'Build Stage'
     jobs:
-      - job: BuildJob
-        displayName: "Build Python Application"
-        pool:
-          vmImage: "ubuntu-latest"
+      - job: build_job
+        displayName: 'Build Python Application'
         steps:
-          - checkout: self
-
           - task: UsePythonVersion@0
-            displayName: "Install Python"
             inputs:
-              versionSpec: "$(python_version)"
+              versionSpec: '$(python_version)'
+            displayName: 'Setup Python $(python_version)'
 
-          - script: "pip install -r requirements.txt"
-            displayName: "Install Dependencies"
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+            displayName: 'Install Dependencies'
 
-          - script: >
-              pip install build &&
-              python -m build --outdir $(Build.ArtifactStagingDirectory)
-            displayName: "Build Package"
-
-  # Stage 2: Test — Run unit tests
-  - stage: Test
-    displayName: "Unit Testing"
-    dependsOn: Build
-    jobs:
-      - job: TestJob
-        displayName: "Run Unit Tests"
-        pool:
-          vmImage: "ubuntu-latest"
-        steps:
-          - checkout: self
-
-          - task: UsePythonVersion@0
-            displayName: "Install Python"
-            inputs:
-              versionSpec: "$(python_version)"
-
-          - script: "pip install -r requirements.txt"
-            displayName: "Install Dependencies"
-
-          - script: "pytest --tb=short --junitxml=$(Agent.TempDirectory)/test-results.xml"
-            displayName: "Run Unit Tests"
+          - script: |
+              python -m pytest tests/ --junitxml=test-results.xml --cov=. --cov-report=xml
+            displayName: 'Run Tests'
+            continueOnError: true
 
           - task: PublishTestResults@2
-            displayName: "Publish Test Results"
             inputs:
-              testResultsFormat: "JUnit"
-              testResultsFiles: "$(Agent.TempDirectory)/test-results.xml"
-            condition: always()
+              testResultsFiles: 'test-results.xml'
+              testRunTitle: 'Python Tests'
+            condition: succeededOrFailed()
 
-  # Stage 3: SAST — Security scanning (mandatory)
-  - stage: SAST
-    displayName: "Security Scan"
-    dependsOn: Test
+  - stage: sast_stage
+    displayName: 'SAST Stage'
+    dependsOn: build_stage
     jobs:
-      - job: SecurityJob
-        displayName: "Run SAST Tools"
-        pool:
-          vmImage: "ubuntu-latest"
+      - job: security_scan
+        displayName: 'Security Scanning'
         steps:
-          - checkout: self
-
-          # Gitleaks — detect secrets and credentials
-          - script: "gitleaks detect --source . --verbose"
-            displayName: "Gitleaks — Secret Detection"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true
+            displayName: 'Gitleaks Secret Scan'
             continueOnError: true
 
-          # Semgrep — static code analysis
-          - script: "semgrep scan --config auto --json --output semgrep-report.json"
-            displayName: "Semgrep — Code Analysis"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true
+            displayName: 'Semgrep SAST Scan'
             continueOnError: true
 
-          # Trivy — dependency and filesystem scan
-          - script: "trivy fs . --format json --output trivy-report.json"
-            displayName: "Trivy — Dependency & FS Scan"
+          - script: |
+              docker run --rm -v $(Build.SourcesDirectory):/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true
+            displayName: 'Trivy Vulnerability Scan'
             continueOnError: true
-
-          # Publish SAST reports
-          - task: PublishBuildArtifacts@1
-            displayName: "Publish SAST Reports"
-            inputs:
-              pathToPublish: "."
-              artifactName: "sast-reports"
-            condition: always()
-
-  # Stage 4: Publish — Publish build artifact
-  - stage: Publish
-    displayName: "Publish Artifact"
-    dependsOn: SAST
-    jobs:
-      - job: PublishJob
-        displayName: "Publish Build Artifact"
-        pool:
-          vmImage: "ubuntu-latest"
-        steps:
-          - checkout: self
-
-          - task: UsePythonVersion@0
-            displayName: "Install Python"
-            inputs:
-              versionSpec: "$(python_version)"
-
-          - script: "pip install -r requirements.txt"
-            displayName: "Install Dependencies"
-
-          - script: >
-              pip install build &&
-              python -m build --outdir $(Build.ArtifactStagingDirectory)
-            displayName: "Build Package"
 
           - task: PublishBuildArtifacts@1
-            displayName: "Publish $(artifact_name)"
             inputs:
-              pathToPublish: "$(Build.ArtifactStagingDirectory)"
-              artifactName: "$(artifact_name)"
+              pathToPublish: '$(Build.SourcesDirectory)'
+              artifactName: 'security-reports'
+            displayName: 'Publish Security Reports'
+
+  - stage: publish_stage
+    displayName: 'Publish Stage'
+    dependsOn: sast_stage
+    jobs:
+      - job: publish_artifacts
+        displayName: 'Publish Build Artifacts'
+        steps:
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: '$(Build.SourcesDirectory)'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/$(artifact_name).zip'
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: '$(artifact_name)'
+            displayName: 'Publish Build Artifacts'

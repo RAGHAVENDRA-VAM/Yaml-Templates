@@ -1,51 +1,29 @@
 ---
-# yaml-templates/gitlab-ci/cd/webapp-cd.yml
-# Purpose: GitLab CI CD pipeline for deploying to Azure Web App.
-# Stages: Deploy
-# Target: Azure Web App with smoke test
-
-variables:
-  PROJECT_NAME: "$CI_PROJECT_NAME"
-  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
-  ENVIRONMENT: "dev"
+# GitLab CI CD Pipeline for Web App Deployment
+# Single Deploy stage for Azure Web App deployment
 
 stages:
   - deploy
 
-# Deploy stage — deploy to Azure Web App
-deploy_webapp:
+variables:
+  AZURE_WEBAPP_NAME: "your-webapp-name"
+  AZURE_RESOURCE_GROUP: "your-resource-group"
+  PROJECT_NAME: "$CI_PROJECT_NAME"
+  ARTIFACT_NAME: "$CI_PROJECT_NAME-drop"
+
+deploy_stage:
   stage: deploy
   image: mcr.microsoft.com/azure-cli:latest
   environment:
-    name: "$ENVIRONMENT"
-    url: "https://$PROJECT_NAME.azurewebsites.net"
-  dependencies:
-    - publish_dotnet  # from upstream CI pipeline
+    name: production
+    url: https://$AZURE_WEBAPP_NAME.azurewebsites.net
   script:
-    # Azure login
+    - echo "Deploying to Azure Web App"
     - az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
-    
-    # Create deployment package
-    - cd dist && zip -r ../app.zip . && cd ..
-    
-    # Deploy to Azure Web App
-    - az webapp deployment source config-zip --resource-group $RESOURCE_GROUP --name $PROJECT_NAME --src app.zip
-    
-    # Smoke test
-    - sleep 30
-    - |
-      if curl --fail --silent --max-time 30 https://$PROJECT_NAME.azurewebsites.net/health; then
-        echo "✅ Smoke test passed"
-      else
-        echo "⚠️ Smoke test failed"
-      fi
-    
-    # Verify app response
-    - |
-      if curl --fail --silent --max-time 30 https://$PROJECT_NAME.azurewebsites.net; then
-        echo "✅ App is responding"
-      else
-        echo "❌ App is not responding"
-      fi
+    - az webapp deployment source config-zip --resource-group $AZURE_RESOURCE_GROUP --name $AZURE_WEBAPP_NAME --src $ARTIFACT_NAME.zip
+  artifacts:
+    reports:
+      deployment: deployment-report.json
   only:
     - main
+  when: manual

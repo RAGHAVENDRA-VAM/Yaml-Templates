@@ -1,115 +1,60 @@
 ---
-# yaml-templates/jenkins/cd/vm-cd.yml
-# Purpose: Jenkins CD pipeline for deploying to Virtual Machine via SSH.
-# Stages: Deploy
-# Target: VM with SSH copy, service restart, and health check
+// Jenkins CD Pipeline for VM Deployment
+// Single Deploy stage for Virtual Machine deployment
 
 pipeline {
-  agent any
-
-  environment {
-    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
-    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
-    ENVIRONMENT = 'dev'
-    VM_HOST = credentials('VM_HOST')
-    VM_USERNAME = credentials('VM_USERNAME')
-    VM_SSH_KEY = credentials('VM_SSH_KEY')
-  }
-
-  triggers {
-    upstream(upstreamProjects: 'ci-pipeline', threshold: hudson.model.Result.SUCCESS)
-  }
-
-  stages {
-    // Deploy stage — deploy to VM
-    stage('Deploy to VM') {
-      steps {
-        echo "Deploying to Virtual Machine: ${env.PROJECT_NAME}"
-        
-        // Copy artifacts from upstream CI job
-        copyArtifacts(
-          projectName: 'ci-pipeline',
-          selector: lastSuccessful(),
-          target: 'artifacts/'
-        )
-
-        // Create deployment package
-        sh 'cd artifacts && zip -r ../app.zip . && cd ..'
-
-        // Copy artifact to VM
-        sh '''
-          scp -i ${VM_SSH_KEY} app.zip ${VM_USERNAME}@${VM_HOST}:/app/releases/${BUILD_ID}/
-        '''
-
-        // Deploy on VM
-        sh '''
-          ssh -i ${VM_SSH_KEY} ${VM_USERNAME}@${VM_HOST} "
-            # Create backup of current version
-            sudo cp -r /app/current /app/backup/\$(date +%Y%m%d_%H%M%S) || true
-            
-            # Deploy new version
-            cd /app/releases/${BUILD_ID}
-            unzip -o app.zip -d /app/current
-            
-            # Set permissions
-            sudo chown -R appuser:appuser /app/current
-            sudo chmod +x /app/current/start.sh || true
-            
-            # Restart service
-            sudo systemctl restart ${PROJECT_NAME}
-          "
-        '''
-
-        // Verify service health
-        script {
-          try {
-            sh '''
-              ssh -i ${VM_SSH_KEY} ${VM_USERNAME}@${VM_HOST} "
-                # Wait for service to start
-                sleep 10
-                
-                # Check service status
-                if systemctl is-active --quiet ${PROJECT_NAME}; then
-                  echo '✅ Service ${PROJECT_NAME} is running'
-                  systemctl status ${PROJECT_NAME} --no-pager
-                else
-                  echo '❌ Service ${PROJECT_NAME} failed to start'
-                  systemctl status ${PROJECT_NAME} --no-pager
-                  exit 1
-                fi
-              "
-            '''
-          } catch (Exception e) {
-            echo "❌ Service health check failed: ${e.getMessage()}"
-            throw e
-          }
+    agent any
+    
+    environment {
+        AZURE_RESOURCE_GROUP = 'your-resource-group'
+        VM_NAME = 'your-vm'
+        DEPLOYMENT_PATH = '/opt/app'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    stages {
+        stage('Deploy Stage') {
+            steps {
+                script {
+                    // Download artifacts from CI build
+                    copyArtifacts(
+                        projectName: "${PROJECT_NAME}-ci",
+                        selector: lastSuccessful(),
+                        target: 'artifacts/'
+                    )
+                    
+                    // Deploy to VM
+                    withCredentials([azureServicePrincipal('azure-service-principal')]) {
+                        sh '''
+                            az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                            
+                            # Prepare VM directory
+                            az vm run-command invoke \
+                                --resource-group $AZURE_RESOURCE_GROUP \
+                                --name $VM_NAME \
+                                --command-id RunShellScript \
+                                --scripts "sudo mkdir -p $DEPLOYMENT_PATH && sudo chown \\$(whoami):\\$(whoami) $DEPLOYMENT_PATH"
+                            
+                            # Copy files to VM
+                            scp -r artifacts/* azureuser@$VM_NAME:$DEPLOYMENT_PATH/
+                            
+                            # Execute deployment script
+                            az vm run-command invoke \
+                                --resource-group $AZURE_RESOURCE_GROUP \
+                                --name $VM_NAME \
+                                --command-id RunShellScript \
+                                --scripts "cd $DEPLOYMENT_PATH && chmod +x deploy.sh && ./deploy.sh"
+                        '''
+                    }
+                }
+            }
         }
-
-        // HTTP health check
-        script {
-          try {
-            sh '''
-              ssh -i ${VM_SSH_KEY} ${VM_USERNAME}@${VM_HOST} \
-                "curl --fail --silent --max-time 30 http://localhost:8080/health"
-              echo "✅ HTTP health check passed"
-            '''
-          } catch (Exception e) {
-            echo "⚠️ HTTP health check failed: ${e.getMessage()}"
-          }
+    }
+    
+    post {
+        always {
+            cleanWs()
         }
-      }
     }
-  }
-
-  post {
-    always {
-      cleanWs()
-    }
-    success {
-      echo "✅ CD pipeline completed successfully"
-    }
-    failure {
-      echo "❌ CD pipeline failed"
-    }
-  }
 }

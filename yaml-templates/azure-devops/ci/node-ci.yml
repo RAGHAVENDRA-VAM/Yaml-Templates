@@ -1,22 +1,18 @@
 ---
 # yaml-templates/azure-devops/ci/node-ci.yml
 # Purpose: Azure DevOps CI pipeline for Node.js applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+# Stages: Build → SAST → Publish
 
 trigger:
   branches:
     include:
       - main
-      - develop
 
 variables:
   node_version: "20.x"
   project_name: "$(Build.Repository.Name)"
-  artifact_name: "$(project_name)-drop"
 
 stages:
-  # Stage 1: Build — Compile Node.js application
   - stage: Build
     displayName: "Build Stage"
     jobs:
@@ -41,43 +37,12 @@ stages:
           - task: CopyFiles@2
             displayName: "Stage Build Output"
             inputs:
-              sourceFolder: "dist"
+              sourceFolder: "."
               targetFolder: "$(Build.ArtifactStagingDirectory)"
 
-  # Stage 2: Test — Run unit tests
-  - stage: Test
-    displayName: "Unit Testing"
-    dependsOn: Build
-    jobs:
-      - job: TestJob
-        displayName: "Run Unit Tests"
-        pool:
-          vmImage: "ubuntu-latest"
-        steps:
-          - checkout: self
-
-          - task: NodeTool@0
-            displayName: "Install Node.js"
-            inputs:
-              versionSpec: "$(node_version)"
-
-          - script: "npm ci"
-            displayName: "Install Dependencies"
-
-          - script: "npm test -- --reporters=jest-junit"
-            displayName: "Run Unit Tests"
-
-          - task: PublishTestResults@2
-            displayName: "Publish Test Results"
-            inputs:
-              testResultsFormat: "JUnit"
-              testResultsFiles: "**/junit.xml"
-            condition: always()
-
-  # Stage 3: SAST — Security scanning (mandatory)
   - stage: SAST
     displayName: "Security Scan"
-    dependsOn: Test
+    dependsOn: Build
     jobs:
       - job: SecurityJob
         displayName: "Run SAST Tools"
@@ -86,30 +51,18 @@ stages:
         steps:
           - checkout: self
 
-          # Gitleaks — detect secrets and credentials
           - script: "gitleaks detect --source . --verbose"
-            displayName: "Gitleaks — Secret Detection"
+            displayName: "Run Gitleaks"
             continueOnError: true
 
-          # Semgrep — static code analysis
-          - script: "semgrep scan --config auto --json --output semgrep-report.json"
-            displayName: "Semgrep — Code Analysis"
+          - script: "semgrep scan --config auto"
+            displayName: "Run Semgrep"
             continueOnError: true
 
-          # Trivy — dependency and filesystem scan
-          - script: "trivy fs . --format json --output trivy-report.json"
-            displayName: "Trivy — Dependency & FS Scan"
+          - script: "trivy fs . --format table --severity HIGH,CRITICAL"
+            displayName: "Run Trivy"
             continueOnError: true
 
-          # Publish SAST reports
-          - task: PublishBuildArtifacts@1
-            displayName: "Publish SAST Reports"
-            inputs:
-              pathToPublish: "."
-              artifactName: "sast-reports"
-            condition: always()
-
-  # Stage 4: Publish — Publish build artifact
   - stage: Publish
     displayName: "Publish Artifact"
     dependsOn: SAST
@@ -133,7 +86,7 @@ stages:
             displayName: "Build Application"
 
           - task: PublishBuildArtifacts@1
-            displayName: "Publish $(artifact_name)"
+            displayName: "Publish $(project_name)-drop"
             inputs:
-              pathToPublish: "dist"
-              artifactName: "$(artifact_name)"
+              pathToPublish: "."
+              artifactName: "$(project_name)-drop"

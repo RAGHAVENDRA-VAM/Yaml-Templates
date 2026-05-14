@@ -1,115 +1,60 @@
 ---
-# yaml-templates/azure-devops/cd/container-cd.yml
-# Purpose: Azure DevOps CD pipeline for deploying as Docker container.
-# Stages: Download → Deploy
-# Target: Docker container with build, push, and run
+# Azure DevOps CD Pipeline for Container Deployment
+# Single Deploy stage for Azure Container Apps deployment
 
 trigger: none
 
-# CD triggers when CI pipeline completes successfully
-resources:
-  pipelines:
-    - pipeline: ci_pipeline
-      source: ci
-      trigger:
-        branches:
-          include:
-            - main
+pool:
+  vmImage: 'ubuntu-latest'
 
 variables:
-  project_name: "$(Build.Repository.Name)"
-  artifact_name: "$(project_name)-drop"
-  environment: "dev"
-  container_registry: "$(CONTAINER_REGISTRY)"
-  registry_username: "$(REGISTRY_USERNAME)"
-  registry_password: "$(REGISTRY_PASSWORD)"
+  azure_subscription: 'your-azure-subscription'
+  resource_group: 'your-resource-group'
+  container_app: 'your-container-app'
+  container_registry: 'your-acr.azurecr.io'
+  image_name: 'your-app'
+  project_name: '$(Build.Repository.Name)'
+  artifact_name: '$(Build.Repository.Name)-drop'
 
 stages:
-  # Stage 1: Deploy as Container
-  - stage: Deploy_Container
-    displayName: "Deploy as Docker Container"
+  - stage: deploy_stage
+    displayName: 'Deploy Stage'
     jobs:
-      - deployment: DeployJob
-        displayName: "Deploy Container"
-        pool:
-          vmImage: "ubuntu-latest"
-        environment: "$(environment)"
+      - deployment: deploy_container
+        displayName: 'Deploy Container'
+        environment: 'production'
         strategy:
           runOnce:
             deploy:
               steps:
-                # Download artifact from CI pipeline
                 - task: DownloadBuildArtifacts@0
-                  displayName: "Download $(artifact_name)"
                   inputs:
-                    buildType: "specific"
-                    project: "$(System.TeamProjectId)"
-                    pipeline: "$(resources.pipeline.ci_pipeline.pipelineID)"
-                    buildVersionToDownload: "latest"
-                    artifactName: "$(artifact_name)"
-                    downloadPath: "$(System.ArtifactsDirectory)"
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: '$(artifact_name)'
+                    downloadPath: '$(Pipeline.Workspace)'
+                  displayName: 'Download Build Artifacts'
 
-                # Build Docker image
                 - task: Docker@2
-                  displayName: "Build Docker Image"
                   inputs:
-                    containerRegistry: "$(CONTAINER_REGISTRY_CONNECTION)"
-                    repository: "$(container_registry)/$(project_name)"
-                    command: "build"
-                    dockerfile: "$(System.ArtifactsDirectory)/$(artifact_name)/Dockerfile"
-                    buildContext: "$(System.ArtifactsDirectory)/$(artifact_name)"
+                    containerRegistry: '$(container_registry)'
+                    repository: '$(image_name)'
+                    command: 'buildAndPush'
+                    Dockerfile: '$(Pipeline.Workspace)/$(artifact_name)/Dockerfile'
+                    buildContext: '$(Pipeline.Workspace)/$(artifact_name)'
                     tags: |
                       $(Build.BuildId)
                       latest
+                  displayName: 'Build and Push Docker Image'
 
-                # Push Docker image to registry
-                - task: Docker@2
-                  displayName: "Push Docker Image"
+                - task: AzureCLI@2
                   inputs:
-                    containerRegistry: "$(CONTAINER_REGISTRY_CONNECTION)"
-                    repository: "$(container_registry)/$(project_name)"
-                    command: "push"
-                    tags: |
-                      $(Build.BuildId)
-                      latest
-
-                # Stop and remove existing container
-                - script: |
-                    docker stop $(project_name) || true
-                    docker rm $(project_name) || true
-                  displayName: "Stop Existing Container"
-                  continueOnError: true
-
-                # Pull and run new container
-                - script: |
-                    docker pull $(container_registry)/$(project_name):$(Build.BuildId)
-                    docker run -d \
-                      --name $(project_name) \
-                      --restart unless-stopped \
-                      -p 80:8080 \
-                      -e ENVIRONMENT=$(environment) \
-                      $(container_registry)/$(project_name):$(Build.BuildId)
-                  displayName: "Run New Container"
-
-                # Verify container is running
-                - script: |
-                    sleep 10
-                    if docker ps | grep -q $(project_name); then
-                      echo "✅ Container $(project_name) is running"
-                      docker ps | grep $(project_name)
-                      docker logs $(project_name) --tail 20
-                    else
-                      echo "❌ Container $(project_name) failed to start"
-                      docker logs $(project_name) || true
-                      exit 1
-                    fi
-                  displayName: "Verify Container Status"
-
-                # Health check
-                - script: >
-                    sleep 30 &&
-                    curl --fail --silent --max-time 30 http://localhost/health
-                    && echo "✅ Container health check passed"
-                    || echo "⚠️ Container health check failed"
-                  displayName: "Container Health Check"
-                  continueOnError: true
+                    azureSubscription: '$(azure_subscription)'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az containerapp update \
+                        --name $(container_app) \
+                        --resource-group $(resource_group) \
+                        --image $(container_registry)/$(image_name):$(Build.BuildId)
+                  displayName: 'Deploy to Container Apps'

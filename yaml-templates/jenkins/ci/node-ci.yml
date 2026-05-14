@@ -1,125 +1,85 @@
 ---
-# yaml-templates/jenkins/ci/node-ci.yml
-# Purpose: Jenkins CI pipeline for Node.js applications.
-# Stages: Build → Test → SAST → Publish
-# Tools: Gitleaks, Semgrep, Trivy for security scanning
+// Jenkins CI Pipeline for Node.js Applications
+// Follows Build -> SAST -> Publish structure with mandatory security scanning
 
 pipeline {
-  agent any
-
-  environment {
-    NODE_VERSION = '20.x'
-    PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
-    ARTIFACT_NAME = "${PROJECT_NAME}-drop"
-  }
-
-  triggers {
-    pollSCM('H/5 * * * *')
-  }
-
-  stages {
-    // Stage 1: Build — Compile Node.js application
-    stage('Build') {
-      steps {
-        echo "Building Node.js application: ${env.PROJECT_NAME}"
+    agent any
+    
+    environment {
+        NODE_VERSION = '20'
+        PROJECT_NAME = "${env.JOB_NAME}"
+        ARTIFACT_NAME = "${env.JOB_NAME}-drop"
+    }
+    
+    tools {
+        nodejs "${NODE_VERSION}"
+    }
+    
+    stages {
+        stage('Build Stage') {
+            steps {
+                script {
+                    sh 'npm ci'
+                    sh 'npm run build'
+                    sh 'npm test'
+                }
+            }
+            post {
+                always {
+                    publishTestResults testResultsPattern: 'test-results.xml'
+                    publishCoverage adapters: [coberturaAdapter('coverage/cobertura-coverage.xml')], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
+                }
+            }
+        }
         
-        // Install Node.js (if not available)
-        sh '''
-          if ! command -v node &> /dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-          fi
-        '''
+        stage('SAST Stage') {
+            parallel {
+                stage('Gitleaks Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/workspace zricethezav/gitleaks:latest detect --source /workspace --report-format json --report-path /workspace/gitleaks-report.json || true'
+                        }
+                    }
+                }
+                stage('Semgrep Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/src semgrep/semgrep --config=auto /src --json --output=/src/semgrep-report.json || true'
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        script {
+                            sh 'docker run --rm -v ${WORKSPACE}:/workspace aquasec/trivy fs /workspace --format json --output /workspace/trivy-report.json || true'
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: '*-report.json', allowEmptyArchive: true
+                }
+            }
+        }
         
-        // Install dependencies and build
-        sh 'npm ci'
-        sh 'npm run build'
-      }
-      post {
-        success {
-          archiveArtifacts artifacts: 'dist/**', fingerprint: true
+        stage('Publish Stage') {
+            steps {
+                script {
+                    echo 'Publishing Node.js application artifacts'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'dist/**,build/**,package.json,package-lock.json,*.yml,*.yaml', allowEmptyArchive: true
+                }
+            }
         }
-      }
     }
-
-    // Stage 2: Test — Run unit tests
-    stage('Test') {
-      steps {
-        echo "Running unit tests"
-        sh 'npm ci'
-        sh 'npm test -- --reporters=jest-junit --outputFile=test-results.xml'
-      }
-      post {
+    
+    post {
         always {
-          publishTestResults testResultsPattern: 'test-results.xml'
+            cleanWs()
         }
-      }
     }
-
-    // Stage 3: SAST — Security scanning (mandatory)
-    stage('SAST') {
-      parallel {
-        stage('Gitleaks') {
-          steps {
-            script {
-              try {
-                sh 'gitleaks detect --source . --verbose'
-              } catch (Exception e) {
-                echo "Gitleaks scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-        stage('Semgrep') {
-          steps {
-            script {
-              try {
-                sh 'semgrep scan --config auto --json --output semgrep-report.json'
-              } catch (Exception e) {
-                echo "Semgrep scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-        stage('Trivy') {
-          steps {
-            script {
-              try {
-                sh 'trivy fs . --format json --output trivy-report.json'
-              } catch (Exception e) {
-                echo "Trivy scan failed: ${e.getMessage()}"
-              }
-            }
-          }
-        }
-      }
-      post {
-        always {
-          archiveArtifacts artifacts: '*-report.json', allowEmptyArchive: true
-        }
-      }
-    }
-
-    // Stage 4: Publish — Publish final artifact
-    stage('Publish') {
-      steps {
-        echo "Publishing ${env.ARTIFACT_NAME}"
-        sh 'npm ci'
-        sh 'npm run build'
-        archiveArtifacts artifacts: 'dist/**', fingerprint: true
-      }
-    }
-  }
-
-  post {
-    always {
-      cleanWs()
-    }
-    success {
-      echo "✅ CI pipeline completed successfully"
-    }
-    failure {
-      echo "❌ CI pipeline failed"
-    }
-  }
 }
