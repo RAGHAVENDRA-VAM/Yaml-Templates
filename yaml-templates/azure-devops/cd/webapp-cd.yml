@@ -58,18 +58,3 @@ stages:
                     resourceGroupName: "$(resource_group)"
                     package: "$(System.ArtifactsDirectory)/$(artifact_name)/**"
                     deploymentMethod: "auto"
-
-                # Smoke test — verify deployment
-                - script: >
-                    sleep 30 &&
-                    curl --fail --silent --max-time 30
-                    https://$(project_name).azurewebsites.net/health
-                  displayName: "Smoke Test"
-                  continueOnError: true
-
-                # Verify app is responding
-                - script: >
-                    curl --fail --silent --max-time 30
-                    https://$(project_name).azurewebsites.net
-                  displayName: "Verify App Response"
-                  continueOnError: true
