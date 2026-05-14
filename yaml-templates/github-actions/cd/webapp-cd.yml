@@ -1,38 +1,39 @@
----
-# yaml-templates/github-actions/cd/webapp-cd.yml
-# Purpose: GitHub Actions CD workflow for deploying to Azure Web App.
-# Stages: Deploy
-
-name: "Web App CD Pipeline"
+name: Web App CD Pipeline
 
 on:
-  workflow_run:
-    workflows: ["Python CI Pipeline"]
-    types:
-      - completed
+  push:
     branches:
       - main
 
 env:
-  AZURE_WEBAPP_NAME: "${{ github.event.repository.name }}"
+  AZURE_WEBAPP_NAME: "your-webapp-name"
 
 jobs:
   deploy:
-    name: "Deploy to Azure Web App"
+    name: Deploy to Azure Web App
     runs-on: ubuntu-latest
-    environment: "production"
-    if: "${{ github.event.workflow_run.conclusion == 'success' }}"
-    steps:
-      - name: "Download Build Artifact"
-        uses: actions/download-artifact@v4
-        with:
-          name: "python-app"
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-          run-id: "${{ github.event.workflow_run.id }}"
+    environment: production
 
-      - name: "Deploy to Azure Web App"
+    steps:
+      # Checkout repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Azure Login using Service Principal
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Zip application
+      - name: Archive Application
+        run: |
+          zip -r app.zip .
+          
+
+      # Deploy to Azure Web App
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: "${{ env.AZURE_WEBAPP_NAME }}"
-          publish-profile: "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}"
-          package: "app.zip"
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: app.zip
