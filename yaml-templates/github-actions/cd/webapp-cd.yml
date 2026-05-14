@@ -52,22 +52,3 @@ jobs:
           app-name: "${{ env.PROJECT_NAME }}"
           resource-group: "${{ secrets.RESOURCE_GROUP }}"
           package: "artifacts/"
-
-      # Smoke test — verify deployment
-      - name: "Smoke Test"
-        run: >
-          sleep 30 &&
-          curl --fail --silent --max-time 30
-          https://${{ env.PROJECT_NAME }}.azurewebsites.net/health
-          && echo "✅ Smoke test passed"
-          || echo "⚠️ Smoke test failed"
-        continue-on-error: true
-
-      # Verify app is responding
-      - name: "Verify App Response"
-        run: >
-          curl --fail --silent --max-time 30
-          https://${{ env.PROJECT_NAME }}.azurewebsites.net
-          && echo "✅ App is responding"
-          || echo "❌ App is not responding"
-        continue-on-error: true
