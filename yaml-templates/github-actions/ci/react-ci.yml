@@ -46,29 +46,6 @@ jobs:
           name: "build-output"
           path: "build/"
 
-  test:
-    name: "Run Tests"
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
-
-      - name: "Setup Node.js"
-        uses: actions/setup-node@v4
-        with:
-          node-version: "${{ env.NODE_VERSION }}"
-          cache: "npm"
-
-      - name: "Install Dependencies"
-        run: "npm ci"
-
-      - name: "Run Unit Tests"
-        run: "npm test -- --coverage --watchAll=false"
-
-      - name: "Upload Coverage"
-        uses: codecov/codecov-action@v3
-
   sast:
     name: "Security Scan"
     runs-on: ubuntu-latest

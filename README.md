@@ -2,7 +2,7 @@
 
 A comprehensive collection of enterprise-grade CI/CD pipeline templates for modern software development across multiple platforms and programming languages.
 
-## 🚀 Overview
+##  Overview
 
 This repository provides production-ready YAML templates for Continuous Integration (CI) and Continuous Deployment (CD) pipelines across four major platforms. All templates follow strict YAML coding standards and include mandatory security scanning with enterprise-grade best practices.
 
@@ -12,7 +12,7 @@ This repository provides production-ready YAML templates for Continuous Integrat
 - **GitLab CI** - GitLab CI/CD YAML
 - **Jenkins** - Jenkins Pipeline (Declarative)
 
-## 📋 Supported Languages & Frameworks
+##  Supported Languages & Frameworks
 
 ### Backend Languages
 - **.NET** (C#, F#, VB.NET)
@@ -30,7 +30,7 @@ This repository provides production-ready YAML templates for Continuous Integrat
 - **Vue.js** (Vue CLI, Nuxt.js)
 - **TypeScript** (Pure TypeScript projects)
 
-## 🏗️ Repository Structure
+##  Repository Structure
 
 ```
 yaml-templates/
@@ -74,7 +74,7 @@ yaml-templates/
     └── ai-reference.yml       # AI agent reference guide
 ```
 
-## 🔧 Template Features
+##  Template Features
 
 ### CI Pipeline Features
 - **Build Automation** - Compile, transpile, and package applications
@@ -94,7 +94,7 @@ yaml-templates/
   - Static Web Apps
 - **Verification** - Health checks and smoke tests
 
-## 🛡️ Security Features
+##  Security Features
 
 All templates include comprehensive security scanning:
 
@@ -103,7 +103,7 @@ All templates include comprehensive security scanning:
 - **Trivy** - Vulnerability scanning for dependencies and containers
 - **Dependency Scanning** - Package vulnerability assessment
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Choose Your Platform
 Select the appropriate directory for your CI/CD platform:
@@ -135,7 +135,7 @@ env:
   PROJECT_NAME: "${{ github.event.repository.name }}"
 ```
 
-## 📖 Usage Examples
+##  Usage Examples
 
 ### GitHub Actions - React Application
 ```yaml
@@ -169,7 +169,7 @@ name: "React CD Pipeline"
 // Copy content from yaml-templates/jenkins/ci/go-ci.yml
 ```
 
-## 🔄 Pipeline Architecture
+##  Pipeline Architecture
 
 ### Standard CI Pipeline Flow (Mandatory Structure)
 Every CI pipeline follows this **mandatory** 4-stage order:
@@ -203,7 +203,7 @@ Every CI pipeline follows this **mandatory** 4-stage order:
 4. **Deploy Production** - Deploy to production with approval gates
 5. **Verify Production** - Final verification and monitoring
 
-## 🎯 Deployment Targets
+##  Deployment Targets
 
 ### Web Applications
 - **Azure Web Apps** - PaaS web hosting
@@ -225,7 +225,7 @@ Every CI pipeline follows this **mandatory** 4-stage order:
 - **Azure Functions** - Serverless computing
 - **Logic Apps** - Workflow automation
 
-## 🔧 Configuration & Standards
+##  Configuration & Standards
 
 ### YAML Coding Standards
 All templates follow these enterprise standards:
@@ -286,7 +286,7 @@ PROJECT_NAME: "${env.JOB_NAME}"
 ARTIFACT_NAME: "${env.JOB_NAME}-drop"
 ```
 
-## 📊 Template Statistics
+##  Template Statistics
 
 - **Total Templates**: 80+
 - **CI Templates**: 44 (Multiple languages × 4 platforms)
@@ -301,7 +301,7 @@ ARTIFACT_NAME: "${env.JOB_NAME}-drop"
 - **GitLab CI**: 17+ templates (DevOps-integrated)
 - **Jenkins**: 17+ templates (Traditional CI/CD)
 
-## 🔍 AI Agent Usage
+##  AI Agent Usage
 
 The `yaml-templates/reference/ai-reference.yml` file contains:
 - Complete YAML coding standards
@@ -312,7 +312,7 @@ The `yaml-templates/reference/ai-reference.yml` file contains:
 
 AI agents should read this reference file before generating any YAML templates to ensure consistency and compliance with enterprise standards.
 
-## 🤝 Contributing
+##  Contributing
 
 ### Adding New Templates
 
@@ -352,17 +352,17 @@ All templates must pass:
 - Artifact naming consistency between CI and CD
 - Security scanning tool integration
 
-## 📝 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
+##  Support
 
 - **Documentation**: Check the `yaml-templates/README.md` for detailed guides
 - **Issues**: Report bugs and request features via GitHub Issues
 - **Discussions**: Join community discussions for best practices
 
-## 🔗 Related Resources
+##  Related Resources
 
 ### Platform Documentation
 - [Azure DevOps Pipelines](https://docs.microsoft.com/en-us/azure/devops/pipelines/)
@@ -381,12 +381,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Azure Kubernetes Service](https://docs.microsoft.com/en-us/azure/aks/)
 - [Azure Static Web Apps](https://docs.microsoft.com/en-us/azure/static-web-apps/)
 
-## 🏷️ Tags
+##  Tags
 
 `ci-cd` `yaml` `github-actions` `azure-devops` `gitlab-ci` `jenkins` `templates` `automation` `devops` `pipeline` `deployment` `security` `sast` `docker` `kubernetes` `azure` `enterprise` `production-ready`
 
 ---
 
-**Made with ❤️ for the DevOps community**
+**Made with  for the DevOps community**
 
 *Enterprise-grade CI/CD templates with mandatory security scanning and best practices built-in.*
