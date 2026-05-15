@@ -38,7 +38,7 @@ jobs:
         run: |
           az webapp config set \
             --name ${{ env.AZURE_WEBAPP_NAME }} \
-            --resource-group devops-maf \
+            --resource-group resourcegroupname \
             --startup-file "npx serve -s /home/site/wwwroot"
            
       - name: Deploy to Azure Web App
