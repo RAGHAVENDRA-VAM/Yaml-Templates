@@ -1,0 +1,92 @@
+---
+# yaml-templates/github-actions/ci/dotnet-framework-ci.yml
+# Purpose: GitHub Actions CI workflow for .NET Framework applications.
+# Stages: Build → SAST → Publish
+
+name: ".NET Framework CI Pipeline"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  BUILD_CONFIGURATION: "Release"
+  SOLUTION_FILE: "*.sln"
+  PROJECT_NAME: "${{ github.event.repository.name }}"
+
+jobs:
+  build:
+    name: "Build .NET Framework App"
+    runs-on: windows-latest
+
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Setup MSBuild"
+        uses: microsoft/setup-msbuild@v2
+
+      - name: "Setup NuGet"
+        uses: NuGet/setup-nuget@v2
+
+      - name: "Restore Dependencies"
+        run: |
+          nuget restore "${{ env.SOLUTION_FILE }}"
+
+      - name: "Build Application"
+        run: |
+          msbuild "${{ env.SOLUTION_FILE }}" ^
+            /p:Configuration=${{ env.BUILD_CONFIGURATION }}
+
+      - name: "Run Unit Tests"
+        run: |
+          vstest.console.exe **\*Tests.dll
+        shell: cmd
+
+      - name: "Publish Application"
+        run: |
+          mkdir dist
+          xcopy /E /I bin\Release dist
+
+      - name: "Archive Application"
+        run: |
+          powershell Compress-Archive -Path dist\* -DestinationPath app.zip
+
+      - name: "Upload Build Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "dotnet-framework-app"
+          path: "app.zip"
+
+  sast:
+    name: "Security Scan (SAST)"
+    runs-on: windows-latest
+    needs: build
+
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Run Semgrep"
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "auto"
+
+      - name: "Run Gitleaks"
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/path zricethezav/gitleaks:latest detect `
+            --source="/path" `
+            --verbose `
+            --redact
+        shell: powershell
+
+      - name: "Run Trivy FS Scan"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "1"
