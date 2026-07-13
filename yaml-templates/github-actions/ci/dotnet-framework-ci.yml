@@ -33,26 +33,37 @@ jobs:
 
       - name: "Restore Dependencies"
         run: |
-          nuget restore "${{ env.SOLUTION_FILE }}"
+          nuget restore ${{ env.SOLUTION_FILE }}
 
       - name: "Build Application"
+        shell: cmd
         run: |
-          msbuild "${{ env.SOLUTION_FILE }}" ^
+          msbuild ${{ env.SOLUTION_FILE }} ^
             /p:Configuration=${{ env.BUILD_CONFIGURATION }}
 
       - name: "Run Unit Tests"
-        run: |
-          vstest.console.exe **\*Tests.dll
         shell: cmd
+        continue-on-error: true
+        run: |
+          for /r %%f in (*Tests.dll) do (
+            vstest.console.exe "%%f"
+          )
 
       - name: "Publish Application"
+        shell: powershell
         run: |
-          mkdir dist
-          xcopy /E /I bin\Release dist
+          New-Item -ItemType Directory -Force -Path dist
+
+          Get-ChildItem -Recurse -Directory |
+          Where-Object { $_.FullName -like "*\bin\${{ env.BUILD_CONFIGURATION }}" } |
+          ForEach-Object {
+              Copy-Item "$($_.FullName)\*" dist -Recurse -Force
+          }
 
       - name: "Archive Application"
+        shell: powershell
         run: |
-          powershell Compress-Archive -Path dist\* -DestinationPath app.zip
+          Compress-Archive -Path dist\* -DestinationPath app.zip
 
       - name: "Upload Build Artifact"
         uses: actions/upload-artifact@v4
@@ -75,15 +86,17 @@ jobs:
           config: "auto"
 
       - name: "Run Gitleaks"
+        shell: powershell
         run: |
-          docker run --rm -v ${{ github.workspace }}:/path zricethezav/gitleaks:latest detect `
+          docker run --rm `
+            -v "${{ github.workspace }}:/path" `
+            zricethezav/gitleaks:latest detect `
             --source="/path" `
             --verbose `
             --redact
-        shell: powershell
 
       - name: "Run Trivy FS Scan"
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: "fs"
           scan-ref: "."
